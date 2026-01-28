@@ -1,0 +1,20 @@
+name: vcap
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - torch
+      - transformers
+      - sentence-transformers
+      - openai
+      - numpy
+      - pandas
+      - scipy
+      - networkx
+      - geoopt
+      - requests
+      - beautifulsoup4
+      - accelerate
+      - safetensors

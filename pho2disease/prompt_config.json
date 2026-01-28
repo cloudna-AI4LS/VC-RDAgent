@@ -1,0 +1,49 @@
+{
+  "base_path": "path/to/VCAP-RDAgent",
+
+  "input_file": "{base_path}/data/PUMCH-ADM.json",
+
+  "phenotype_hpoa": "{base_path}/hpo_annotations/phenotype.hpoa",
+  "obo_file": "{base_path}/hpo_annotations/hp.obo",
+  "genes_to_phenotype": "{base_path}/hpo_annotations/genes_to_phenotype.txt",
+  "genes_to_disease": "{base_path}/hpo_annotations/genes_to_disease.txt",
+  "disease_descriptions_file": "{base_path}/hpo_annotations/disease_descriptions_batch.json",
+  "mondo_file": "{base_path}/mondo_annotations/mondo_parsed_full.json",
+  "orphanet_files": {
+    "alignment_json": "{base_path}/orphanet_annotations/rare_diseases_alignment.json",
+    "categorization_csv": "{base_path}/orphanet_annotations/categorization_of_orphanet_diseases.csv",
+    "phenotype_disease_json": "{base_path}/orphanet_annotations/Phenotypes_Associated_with_Rare_Disorders.json"
+  },
+
+  "case_library": "{base_path}/general_cases/phenotype_disease_case_library.jsonl",
+  "embedding_file": "{base_path}/hpo_embedding/phe2embedding_recomputed.json",
+  "ic_file": "{base_path}/hpo_embedding/ic_dict_recomputed.json",
+
+  "case_extraction_method": "overlap",
+  "use_samples": false,
+  "embedding_resort": false,
+  "top_k": 50,
+  "use_frequency_weights": false,
+  "use_IC_weights": false,
+
+  "prompt_steps": 2,
+  "output_file": "",
+  "max_samples": null,
+
+  "gpu_id": 2,
+  "sentence_transformer_cache_dir": "{base_path}/model_weight",
+
+  "evaluation_config": {
+    "similarity_threshold": 0.80
+  },
+
+  "use_kg": false,
+  "kg_api_url": "http://192.168.0.9:5008/nebulasearch/",
+  "kg_api_space": "RDPkg",
+  "kg_api_timeout": 60,
+
+  "graph_output": {
+    "output_dir": "{base_path}/disease_phenotype_kg",
+    "recomputed_ic_file": "{base_path}/hpo_embedding/ic_dict_recomputed.json"
+  }
+}

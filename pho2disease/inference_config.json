@@ -1,0 +1,53 @@
+{
+  "base_paths": {
+    "base_path": "path/to/VCAP-RDAgent"
+  },
+  "model_config": {
+    "default_model_name": "openrouter",
+    "default_cache_dir": "${base_path}/model_weight",
+    "enable_thinking": true,
+    "max_new_tokens": 8192,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20
+  },
+  "openrouter_config": {
+    "api_key": "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",
+    "proxy_url": "https://openrouter.ai/api/v1",
+    "model_name": "qwen/qwen3-8b:free",
+    "max_retries": 5,
+    "retry_delay": 60,
+    "use_payload_mode": true,
+    "provider": ""
+  },
+  "file_paths": {
+    "mapping_files": {
+      "phe2embedding": ["${base_path}/hpo_embedding/phe2embedding_recomputed.json"],
+      "ic_dict": ["${base_path}/hpo_embedding/ic_dict_recomputed.json"]
+    },
+    "orphanet_files": {
+      "alignment_json": "${base_path}/orphanet_annotations/rare_diseases_alignment.json",
+      "categorization_csv": "${base_path}/orphanet_annotations/categorization_of_orphanet_diseases.csv",
+      "phenotype_disease_json": "${base_path}/orphanet_annotations/Phenotypes_Associated_with_Rare_Disorders.json"
+    },
+    "obo_file": "${base_path}/hpo_annotations/hp.obo",
+    "hpoa_file": "${base_path}/hpo_annotations/phenotype.hpoa",
+    "disease_descriptions_file": "${base_path}/hpo_annotations/disease_descriptions_batch.json",
+    "mondo_file": "${base_path}/mondo_annotations/mondo_parsed_full.json",
+    "case_library": "${base_path}/general_cases/phenotype_disease_case_library.jsonl"
+  },
+  "evaluation_config": {
+    "similarity_threshold": 0.8,
+    "max_retries": 5,
+    "default_k_shot": 10,
+    "sentence_transformer_model": "FremyCompany/BioLORD-2023"
+  },
+  "memory_reasoning_config": {
+    "enabled": false,
+    "max_steps": 10
+  },
+  "output_config": {
+    "default_output_file": "${base_path}/pho2disease/result/phenotype_to_disease_results_${timestamp}.json"
+  },
+  "sentence_transformer_cache_dir": "${base_path}/model_weight"
+}
