@@ -176,7 +176,7 @@ python generate_prompts_bysteps.py --config prompt_config.json --prompt_steps 2 
 | `--case_library` | Case library JSONL (required for `embedding`/`both` or `--use_samples`) |
 | `--embedding_file`, `--ic_file` | Required for `embedding` / `both` |
 | `--case_extraction_method` | `overlap` \| `embedding` \| `both` |
-| `--prompt_steps` | 1 \| 2 \| 3 \| 4 |
+| `--prompt_steps` | 2 \| 3 |
 | `--top_k` | Candidate diseases per sample |
 | `--use_IC_weights`, `--use_frequency_weights`, `--use_score` | Ranking weights |
 | `--use_samples` | Use true associations from case library (requires `--case_library`) |
@@ -296,8 +296,8 @@ python xml_to_json_converter_product1.py --input rare_diseases_alignment.xml \
 
 **`categorization_of_orphanet_diseases.csv` and `disease_type_mapping.json`** — from Orphanet **Product 3** (Classifications of rare diseases):
 
-1. Download [Product 3](https://www.orphadata.com/data/) (XML package "Classifications of rare diseases") from Orphanet.
-2. Extract the XMLs (e.g. `en_product3_*.xml`) into a directory such as `orphanet_annotations/Classifications of rare diseases/`.
+1. Download XML package "Classifications of rare diseases" from Orphanet.
+2. Extract the XMLs into a directory such as `orphanet_annotations/Classifications of rare diseases/`.
 3. Run `extract_disease_type_mapping.py`; it writes both `disease_type_mapping.json` and `categorization_of_orphanet_diseases.csv`:
 
 ```bash
