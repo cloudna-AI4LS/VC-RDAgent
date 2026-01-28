@@ -270,9 +270,6 @@ python phenotype_to_disease_prediction_bysteps.py --prompts_file ./prompt/xxx.js
 | `--api_model` | OpenRouter model override |
 | `--gpu_id` | GPU for local Qwen |
 | `--enable_thinking` | Enable thinking/CoT |
-| `--use_few_shot` | Similar-case few-shot from `--case_library` |
-| `--case_library` | Case library JSONL |
-| `--k_shot` | Few-shot count |
 | `--sample_indices`, `--num_samples` | Sample subset |
 | `--max_retries` | Retries on API failure |
 

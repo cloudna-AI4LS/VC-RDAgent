@@ -15,12 +15,6 @@ Config (inference_config.json)
 - model_config.default_model_name: default --model_name.
 - model_config.enable_thinking: default for thinking/CoT mode (or override with --enable_thinking).
 
-Few-shot
---------
-- --use_few_shot: enable similar-case retrieval from a case library.
-- --case_library: path to case library JSONL (or set in config file_paths.case_library).
-- --k_shot: number of similar samples to inject.
-
 Main CLI
 --------
   --prompts_file     Path to prompts JSON (required)
