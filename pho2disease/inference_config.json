@@ -12,7 +12,7 @@
     "top_k": 20
   },
   "openrouter_config": {
-    "api_key": "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",
+    "api_key": "",
     "proxy_url": "https://openrouter.ai/api/v1",
     "model_name": "qwen/qwen3-8b:free",
     "max_retries": 5,
