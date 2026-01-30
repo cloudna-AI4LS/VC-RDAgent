@@ -1,0 +1,11 @@
+{
+  "model_config": {
+    "model": "Qwen/Qwen3-8B",
+    "model_provider": "",
+    "base_url": "http://192.168.0.127:8000/v1",
+    "api_key": "EMPTY",
+    "temperature": 0.1,
+    "top_p": 0.95,
+    "streaming": true
+  }
+}

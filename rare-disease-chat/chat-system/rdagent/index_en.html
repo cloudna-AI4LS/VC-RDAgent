@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</title>
+    <!-- Markdown renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <!-- Code highlighting (optional) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            height: 90vh;
+            overflow: hidden;
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .sidebar h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .sidebar .example-case {
+            margin-bottom: 10px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid #e0e0e0;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar .example-case:hover {
+            background: #e3f2fd;
+            border-color: #667eea;
+            transform: translateX(4px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .sidebar .example-case strong {
+            display: block;
+            color: #667eea;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+
+        .sidebar .example-case {
+            font-size: 12px;
+            line-height: 1.5;
+            color: #555;
+        }
+
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-items: flex-end;
+        }
+
+        .message.assistant {
+            align-items: flex-start;
+        }
+
+        .message-content {
+            max-width: 100%;
+            padding: 15px 20px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            line-height: 1.6;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.assistant .message-content h2,
+        .message.assistant .message-content h3 {
+            margin-top: 20px;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .message.assistant .message-content h2:first-child,
+        .message.assistant .message-content h3:first-child {
+            margin-top: 0;
+        }
+
+        .message.assistant .message-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .message.assistant .message-content table th,
+        .message.assistant .message-content table td {
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            text-align: left;
+        }
+
+        .message.assistant .message-content table th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+
+        .message.assistant .message-content ul,
+        .message.assistant .message-content ol {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+
+        .message.assistant .message-content li {
+            margin: 5px 0;
+        }
+
+        /* Enhanced Markdown styles */
+        .message.assistant .message-content {
+            line-height: 1.8;
+        }
+
+        .message.assistant .message-content h1,
+        .message.assistant .message-content h2,
+        .message.assistant .message-content h3,
+        .message.assistant .message-content h4,
+        .message.assistant .message-content h5,
+        .message.assistant .message-content h6 {
+            margin-top: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+            line-height: 1.25;
+            color: #667eea;
+        }
+
+        .message.assistant .message-content h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        .message.assistant .message-content h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        .message.assistant .message-content h3 {
+            font-size: 1.25em;
+        }
+
+        .message.assistant .message-content p {
+            margin: 10px 0;
+        }
+
+        .message.assistant .message-content code {
+            background-color: rgba(27, 31, 35, 0.05);
+            border-radius: 3px;
+            font-size: 85%;
+            margin: 0;
+            padding: 0.2em 0.4em;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        .message.assistant .message-content pre {
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            font-size: 85%;
+            line-height: 1.45;
+            overflow: auto;
+            padding: 16px;
+            margin: 16px 0;
+        }
+
+        .message.assistant .message-content pre code {
+            background-color: transparent;
+            border: 0;
+            display: inline;
+            line-height: inherit;
+            margin: 0;
+            overflow: visible;
+            padding: 0;
+            word-wrap: normal;
+        }
+
+        .message.assistant .message-content blockquote {
+            border-left: 4px solid #dfe2e5;
+            color: #6a737d;
+            padding: 0 1em;
+            margin: 16px 0;
+        }
+
+        .message.assistant .message-content a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .message.assistant .message-content a:hover {
+            text-decoration: underline;
+        }
+
+        .message.assistant .message-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 6px;
+            margin: 16px 0;
+        }
+
+        .message.assistant .message-content hr {
+            background-color: #e1e4e8;
+            border: 0;
+            height: 0.25em;
+            margin: 24px 0;
+            padding: 0;
+        }
+
+        .status-indicator {
+            display: block;
+            padding: 5px 12px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-bottom: 5px;
+            animation: pulse 2s infinite;
+        }
+
+        /* Completed status: green */
+        .status-indicator.completed {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        #statusIndicator {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        /* Example cases style */
+        .message-content ul li {
+            transition: all 0.2s ease;
+        }
+
+        .message-content ul li:hover {
+            background: #e3f2fd !important;
+            transform: translateX(4px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .input-container {
+            padding: 20px 30px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            border-radius: 0 0 20px 20px;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .input-box {
+            flex: 1;
+            position: relative;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            min-height: 50px;
+            max-height: 150px;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-send {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-send:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-clear {
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        .btn-clear:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 10px 15px;
+            background: #f5f5f5;
+            border-radius: 12px;
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        /* Collapsible reasoning panel */
+        .reasoning-container {
+            width: 100%;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .reasoning-toggle {
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .reasoning-toggle:hover {
+            background: #eeeeee;
+            border-color: #667eea;
+        }
+
+        .reasoning-toggle .toggle-icon {
+            font-size: 14px;
+            color: #667eea;
+            transition: transform 0.2s ease;
+        }
+
+        .reasoning-toggle.expanded .toggle-icon {
+            transform: rotate(90deg);
+        }
+
+        .reasoning-content {
+            display: none;
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 15px;
+            margin-top: -1px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #555;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .reasoning-content.expanded {
+            display: block;
+        }
+
+        .reasoning-content code {
+            background-color: rgba(27, 31, 35, 0.05);
+            border-radius: 3px;
+            font-size: 85%;
+            padding: 0.2em 0.4em;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            border-left: 4px solid #c62828;
+        }
+
+        /* Scrollbar styles */
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                height: 100vh;
+                border-radius: 0;
+            }
+
+            .header {
+                border-radius: 0;
+            }
+
+            .main-content {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                max-height: 200px;
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+                overflow-y: auto;
+            }
+
+            .sidebar h3 {
+                font-size: 14px;
+                margin-bottom: 10px;
+            }
+
+            .sidebar .example-case {
+                padding: 8px;
+                font-size: 11px;
+            }
+
+            .sidebar .example-case strong {
+                font-size: 12px;
+            }
+
+            .content-area {
+                flex: 1;
+            }
+
+            .message-content {
+                max-width: 85%;
+            }
+
+            .input-wrapper {
+                flex-direction: column;
+            }
+
+            .button-group {
+                width: 100%;
+            }
+
+            button {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</h1>
+            <p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p>
+        </div>
+
+        <div class="main-content">
+            <!-- Left sidebar -->
+            <div class="sidebar">
+                <h3>📋 Example Cases</h3>
+                <div class="example-case"
+                    data-example="The patient presents with the following phenotypic abnormalities: HP:0000793, HP:0001974, HP:0002205, HP:0002633, HP:0003496, and HP:0100778. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.">
+                    <strong>Case 1:</strong>
+                    <span>The patient presents with the following phenotypic abnormalities: HP:0000793, HP:0001974, HP:0002205, HP:0002633, HP:0003496, and HP:0100778. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.</span>
+                </div>
+                <div class="example-case"
+                    data-example="The patient presents with the following phenotypic abnormalities: membranoproliferative glomerulonephritis, increased total leukocyte count, recurrent respiratory infections, vasculitis, increased circulating IgM level, and cryoglobulinemia. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.">
+                    <strong>Case 2:</strong>
+                    <span>The patient presents with the following phenotypic abnormalities: membranoproliferative glomerulonephritis, increased total leukocyte count, recurrent respiratory infections, vasculitis, increased circulating IgM level, and cryoglobulinemia. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.</span>
+                </div>
+                <div class="example-case"
+                    data-example='"HP:0000421", "HP:0002105", "HP:0002113", "HP:0002829", "HP:0002907", "HP:0011227", "HP:0012213", "HP:0032230"'>
+                    <strong>Case 3:</strong>
+                    <span>HP:0000421, HP:0002105, HP:0002113, HP:0002829, HP:0002907, HP:0011227, HP:0012213, HP:0032230</span>
+                </div>
+                <div class="example-case"
+                    data-example="What are the main features of White-Kernohan syndrome?">
+                    <strong>Case 4:</strong>
+                    <span>What are the main features of White-Kernohan syndrome?</span>
+                </div>
+                <div class="example-case"
+                    data-example="What diseases are represented by ORPHA:397, OMIM:253800, and OMIM:153400?">
+                    <strong>Case 5:</strong>
+                    <span>What diseases are represented by ORPHA:397, OMIM:253800, and OMIM:153400?</span>
+                </div>
+            </div>
+
+            <!-- Main content area -->
+            <div class="content-area">
+                <div class="chat-container" id="chatContainer">
+                    <div class="message assistant">
+                        <div class="message-content">
+                            <p>Welcome to the VCAP-RDAgent Rare Disease Intelligent Diagnosis System!</p>
+                            <p>You can enter a patient's symptoms, phenotypes, or HPO IDs, and the system will automatically perform diagnostic analysis.</p>
+                            <p>Tip: click an example case in the left sidebar to get started quickly.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-container">
+                    <div id="statusIndicator" style="display: none;">
+                        <div class="status-indicator" id="statusText1"></div>
+                        <div class="status-indicator" id="statusText2" style="display: none;"></div>
+                    </div>
+                    <div class="input-wrapper">
+                        <div class="input-box">
+                            <textarea
+                                id="userInput"
+                                placeholder="Enter your question or symptom description..."
+                                rows="1"
+                            ></textarea>
+                        </div>
+                        <div class="button-group">
+                            <button class="btn-clear" id="clearBtn" onclick="clearChat()">Clear</button>
+                            <button class="btn-send" id="sendBtn" onclick="sendMessage()">
+                                <span id="sendBtnText">Send</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Markdown renderer
+        function initMarkdown() {
+            if (typeof marked !== 'undefined') {
+                marked.setOptions({
+                    breaks: true,  // GitHub-style line breaks
+                    gfm: true,     // GitHub-flavored Markdown
+                    headerIds: false,  // Disable header IDs (avoid collisions)
+                    mangle: false,     // Do not mangle email addresses
+                    sanitize: false    // Allow HTML (we trust backend output)
+                });
+            }
+        }
+
+        // Init on page load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initMarkdown);
+        } else {
+            initMarkdown();
+        }
+
+        let sessionId = null;
+        let isProcessing = false;
+        let statusHistory = []; // Keep up to 2 most recent statuses
+
+        const CN_COMPLETED_PREFIX = '[\u5df2\u5b8c\u6210]';
+        function isCompletedStatus(text) {
+            return typeof text === 'string' && (text.startsWith('[Completed]') || text.startsWith(CN_COMPLETED_PREFIX));
+        }
+
+        // Initialize session ID
+        function initSession() {
+            if (!sessionId) {
+                sessionId = 'session_' + Date.now();
+            }
+        }
+
+        // Use an example case
+        function useExample(exampleText) {
+            const input = document.getElementById('userInput');
+            input.value = exampleText;
+            input.focus();
+            // Optional: auto-send
+            // sendMessage();
+        }
+
+        // Example click: event delegation (avoids inline onclick escaping issues, especially JSON array strings)
+        document.addEventListener('click', function(e) {
+            const el = e.target && e.target.closest ? e.target.closest('.example-case') : null;
+            if (!el) return;
+            const example = el.getAttribute('data-example');
+            if (!example) return;
+            useExample(example);
+        });
+
+        // Send message
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const query = input.value.trim();
+
+            if (!query || isProcessing) {
+                return;
+            }
+
+            // Disable input and buttons
+            isProcessing = true;
+            input.disabled = true;
+            const sendBtn = document.getElementById('sendBtn');
+            const sendBtnText = document.getElementById('sendBtnText');
+            sendBtn.disabled = true;
+            sendBtnText.innerHTML = '<span class="loading"></span>Processing...';
+
+            // Add user message to UI
+            addMessage('user', query);
+            input.value = '';
+
+            // Show status indicator
+            showStatus('Processing...');
+
+            // Initialize session
+            initSession();
+
+            // Create a new assistant message container
+            const assistantMessageId = 'msg_' + Date.now();
+            addMessage('assistant', '', assistantMessageId);
+
+            // Use fetch to POST and handle streaming response
+            sendMessageWithFetch(query, assistantMessageId);
+        }
+
+        // Use fetch to POST and handle streaming response
+        async function sendMessageWithFetch(query, messageId) {
+            try {
+                const response = await fetch('/api/chat/stream_en', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-UI-Page': 'index_en.html',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        session_id: sessionId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                const messageContainer = document.getElementById(messageId);
+
+                while (true) {
+                    const { done, value } = await reader.read();
+
+                    if (done) {
+                        break;
+                    }
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+
+                                if (data.type === 'status') {
+                                    showStatus(data.data);
+                                } else if (data.type === 'content') {
+                                    appendToMessage(messageContainer, data.data);
+                                } else if (data.type === 'reasoning') {
+                                    appendReasoning(messageContainer, data.data);
+                                } else if (data.type === 'error') {
+                                    showError(data.data);
+                                    resetUI();
+                                    return;
+                                } else if (data.type === 'done') {
+                                    hideStatus();
+                                    resetUI();
+                                    return;
+                                }
+                            } catch (e) {
+                                console.error('Failed to parse stream data:', e);
+                            }
+                        }
+                    }
+                }
+
+                resetUI();
+            } catch (error) {
+                console.error('Failed to send message:', error);
+                showError('Send failed: ' + error.message);
+                resetUI();
+            }
+        }
+
+        // Add a message to the chat container
+        function addMessage(role, content, messageId = null) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            if (messageId) {
+                contentDiv.id = messageId;
+            }
+
+            if (content) {
+                // Save raw content to data attribute
+                contentDiv.dataset.rawContent = content;
+                contentDiv.innerHTML = formatMessage(content);
+            } else {
+                // Initialize empty content
+                contentDiv.dataset.rawContent = '';
+            }
+
+            messageDiv.appendChild(contentDiv);
+            chatContainer.appendChild(messageDiv);
+
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            return contentDiv;
+        }
+
+        // Append content to a message
+        function appendToMessage(messageContainer, content) {
+            if (messageContainer) {
+                // Parent element (messageDiv). The reasoning container is inside the parent.
+                const messageDiv = messageContainer.parentElement;
+
+                // Before re-rendering, save the reasoning container (if any)
+                let savedReasoningContainer = null;
+                if (messageDiv) {
+                    const existingContainer = messageDiv.querySelector('.reasoning-container');
+                    if (existingContainer) {
+                        const isExpanded = existingContainer.querySelector('.reasoning-toggle')?.classList.contains('expanded');
+                        const reasoningContent = existingContainer.querySelector('.reasoning-content')?.innerHTML || '';
+                        savedReasoningContainer = {
+                            container: existingContainer.cloneNode(true),
+                            expanded: isExpanded,
+                            content: reasoningContent
+                        };
+                    }
+                }
+
+                // Get raw text content
+                let rawContent = messageContainer.dataset.rawContent || '';
+
+                // Append new content to raw text
+                rawContent += content;
+
+                // Save raw text
+                messageContainer.dataset.rawContent = rawContent;
+
+                // Format and display
+                messageContainer.innerHTML = formatMessage(rawContent);
+
+                // Re-add reasoning container before the contentDiv
+                if (messageDiv && savedReasoningContainer) {
+                    const oldContainer = messageDiv.querySelector('.reasoning-container');
+                    if (oldContainer) {
+                        oldContainer.remove();
+                    }
+                    messageDiv.insertBefore(savedReasoningContainer.container, messageContainer);
+
+                    // Rebind event listener (cloneNode doesn't clone listeners)
+                    const toggle = savedReasoningContainer.container.querySelector('.reasoning-toggle');
+                    const content = savedReasoningContainer.container.querySelector('.reasoning-content');
+                    if (toggle && content) {
+                        toggle.addEventListener('click', function() {
+                            toggle.classList.toggle('expanded');
+                            content.classList.toggle('expanded');
+                        });
+
+                        // Restore expanded state
+                        if (savedReasoningContainer.expanded) {
+                            toggle.classList.add('expanded');
+                            content.classList.add('expanded');
+                        }
+                    }
+                }
+
+                // Scroll to bottom
+                const chatContainer = document.getElementById('chatContainer');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+
+        // Append reasoning content to a message
+        function appendReasoning(messageContainer, reasoningText) {
+            if (!messageContainer) return;
+
+            // Parent element (messageDiv). The reasoning container should be a sibling of contentDiv.
+            const messageDiv = messageContainer.parentElement;
+            if (!messageDiv) return;
+
+            // Find or create reasoning container
+            let reasoningContainer = messageDiv.querySelector('.reasoning-container');
+            if (!reasoningContainer) {
+                reasoningContainer = document.createElement('div');
+                reasoningContainer.className = 'reasoning-container';
+
+                const toggle = document.createElement('div');
+                toggle.className = 'reasoning-toggle';
+                toggle.innerHTML = `
+                    <span>💭 Reasoning</span>
+                    <span class="toggle-icon">▶</span>
+                `;
+
+                const content = document.createElement('div');
+                content.className = 'reasoning-content';
+
+                toggle.addEventListener('click', function() {
+                    toggle.classList.toggle('expanded');
+                    content.classList.toggle('expanded');
+                });
+
+                reasoningContainer.appendChild(toggle);
+                reasoningContainer.appendChild(content);
+
+                // Insert reasoning container before the final answer contentDiv
+                messageDiv.insertBefore(reasoningContainer, messageContainer);
+            }
+
+            // Append reasoning text (escape HTML)
+            const reasoningContent = reasoningContainer.querySelector('.reasoning-content');
+            const escapedText = escapeHtml(reasoningText);
+            reasoningContent.innerHTML += escapedText;
+
+            // Scroll to bottom
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Format message content (Markdown rendering)
+        function formatMessage(text) {
+            if (!text) return '';
+
+            if (typeof marked !== 'undefined') {
+                try {
+                    let html = marked.parse(text);
+
+                    // Highlight code blocks (if highlight.js is available)
+                    if (typeof hljs !== 'undefined') {
+                        requestAnimationFrame(() => {
+                            const container = document.getElementById('chatContainer');
+                            if (container) {
+                                container.querySelectorAll('pre code').forEach((block) => {
+                                    if (!block.classList.contains('hljs')) {
+                                        hljs.highlightElement(block);
+                                    }
+                                });
+                            }
+                        });
+                    }
+
+                    return html;
+                } catch (e) {
+                    console.error('Markdown render error:', e);
+                    return escapeHtml(text);
+                }
+            } else {
+                return escapeHtml(text);
+            }
+        }
+
+        // HTML escape (fallback)
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/\n/g, '<br>');
+        }
+
+        // Show status (keep up to two most recent lines)
+        function showStatus(text) {
+            statusHistory.push(text);
+
+            if (statusHistory.length > 2) {
+                statusHistory.shift();
+            }
+
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText1 = document.getElementById('statusText1');
+            const statusText2 = document.getElementById('statusText2');
+
+            statusIndicator.style.display = 'block';
+
+            // First line (older, on top)
+            if (statusHistory.length >= 2) {
+                statusText1.textContent = statusHistory[statusHistory.length - 2];
+                statusText1.style.display = 'block';
+                statusText1.className = 'status-indicator' + (isCompletedStatus(statusText1.textContent) ? ' completed' : '');
+            } else {
+                statusText1.style.display = 'none';
+            }
+
+            // Second line (newer, below)
+            if (statusHistory.length >= 1) {
+                statusText2.textContent = statusHistory[statusHistory.length - 1];
+                statusText2.style.display = 'block';
+                statusText2.className = 'status-indicator' + (isCompletedStatus(statusText2.textContent) ? ' completed' : '');
+            } else {
+                statusText2.style.display = 'none';
+            }
+        }
+
+        // Hide status
+        function hideStatus() {
+            const statusIndicator = document.getElementById('statusIndicator');
+            statusIndicator.style.display = 'none';
+            statusHistory = [];
+        }
+
+        // Show error
+        function showError(message) {
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = '❌ ' + message;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Reset UI
+        function resetUI() {
+            isProcessing = false;
+            const input = document.getElementById('userInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const sendBtnText = document.getElementById('sendBtnText');
+
+            input.disabled = false;
+            sendBtn.disabled = false;
+            sendBtnText.textContent = 'Send';
+            input.focus();
+        }
+
+        // Clear chat
+        function clearChat() {
+            if (isProcessing) {
+                resetUI();
+            }
+
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = `
+                <div class="message assistant">
+                    <div class="message-content">
+                        <p>Welcome to the Rare Disease Intelligent Diagnosis System!</p>
+                        <p>You can enter a patient's symptoms, phenotypes, or HPO IDs, and the system will automatically perform diagnostic analysis.</p>
+                        <p>Tip: click an example case in the left sidebar to get started quickly.</p>
+                    </div>
+                </div>
+            `;
+
+            sessionId = null;
+            statusHistory = [];
+            hideStatus();
+        }
+
+        // Press Enter to send (Shift+Enter for newline)
+        document.getElementById('userInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Auto-resize textarea height
+        document.getElementById('userInput').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+        });
+    </script>
+</body>
+</html>
+

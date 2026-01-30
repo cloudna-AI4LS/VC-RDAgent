@@ -1,0 +1,577 @@
+@host = localhost:3000
+@requestId = 1
+
+###############################################
+# 1. List All Available Tools
+###############################################
+
+### List all available tools
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/list",
+  "params": {}
+}
+
+###############################################
+# 2. Phenotype Extractor Tests
+###############################################
+
+### Test phenotype-extractor - Basic query
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "Patient presents with intellectual disability, developmental delay, and hypotonia"
+    }
+  }
+}
+
+### Test phenotype-extractor - Query with HPO IDs
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "Patient has HP:0001250 and HP:0001249 symptoms, showing intellectual developmental delay"
+    }
+  }
+}
+
+### Test phenotype-extractor - Initialize only
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "",
+      "only_init": true
+    }
+  }
+}
+
+### Test phenotype-extractor - Full parameters
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "Patient has seizures, intellectual disability, microcephaly",
+      "include_categories": true
+    }
+  }
+}
+
+### Test phenotype-extractor - Empty query (error case)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": ""
+    }
+  }
+}
+
+### Test phenotype-extractor - Complex clinical description
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "A 5-year-old boy presents with global developmental delay, hypotonia, seizures, microcephaly, and characteristic facial features including prominent forehead and deep-set eyes"
+    }
+  }
+}
+
+###############################################
+# 3. Disease Information Retrieval Tests
+###############################################
+
+### Test disease-information-retrieval - Extract from query with model
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "Patient may have Down syndrome or Trisomy 21",
+      "use_model": true
+    }
+  }
+}
+
+### Test disease-information-retrieval - With disease ID
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "OMIM:190685",
+      "use_model": true
+    }
+  }
+}
+
+### Test disease-information-retrieval - With candidates (no model)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "candidates provided",
+      "use_model": false,
+      "candidates": ["Down syndrome", "Trisomy 21", "OMIM:190685"]
+    }
+  }
+}
+
+### Test disease-information-retrieval - Empty query (error case)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "",
+      "use_model": true
+    }
+  }
+}
+
+### Test disease-information-retrieval - Multiple disease names
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "The patient might have Rett syndrome, Angelman syndrome, or Prader-Willi syndrome",
+      "use_model": true
+    }
+  }
+}
+
+###############################################
+# 4. Disease Case Extractor Tests
+###############################################
+
+### Test extract-disease-cases - Basic query
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "Patient presents with intellectual disability, developmental delay, and hypotonia"
+    }
+  }
+}
+
+### Test extract-disease-cases - With custom top_k parameters
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "Patient has seizures, microcephaly, and intellectual disability",
+      "top_k": 50,
+      "final_top_k": 20
+    }
+  }
+}
+
+### Test extract-disease-cases - Complex phenotype description
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "A child with global developmental delay, hypotonia, seizures, microcephaly, characteristic facial dysmorphism, and feeding difficulties",
+      "top_k": 100,
+      "final_top_k": 30
+    }
+  }
+}
+
+### Test extract-disease-cases - Empty query (error case)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": ""
+    }
+  }
+}
+
+### Test extract-disease-cases - Query with HPO IDs only
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "HP:0001250 HP:0001249 HP:0001252",
+      "top_k": 100,
+      "final_top_k": 50
+    }
+  }
+}
+
+###############################################
+# 5. Disease Diagnosis Tests (Workflow)
+###############################################
+# Note: This requires extracted_phenotypes and disease_cases from previous tools
+###############################################
+
+### Test disease-diagnosis - Full workflow (requires manual data preparation)
+# First run phenotype-extractor and extract-disease-cases, then use their outputs here
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-diagnosis",
+    "arguments": {
+      "original_query": "Patient presents with intellectual disability, developmental delay, and hypotonia",
+      "extracted_phenotypes": {
+        "HP:0001250,HP:0001249,HP:0001252": {
+          "Intellectual disability": {
+            "hpo_id": "HP:0001250",
+            "phenotype abnormal category": "Abnormality of the nervous system",
+            "synonyms": [],
+            "parent categories": [],
+            "detailed information": ""
+          },
+          "Global developmental delay": {
+            "hpo_id": "HP:0001249",
+            "phenotype abnormal category": "Abnormality of the nervous system",
+            "synonyms": [],
+            "parent categories": [],
+            "detailed information": ""
+          },
+          "Hypotonia": {
+            "hpo_id": "HP:0001252",
+            "phenotype abnormal category": "Abnormality of the nervous system",
+            "synonyms": [],
+            "parent categories": [],
+            "detailed information": ""
+          }
+        }
+      },
+      "disease_cases": {
+        "Case 1": {
+          "Disease name": "Down syndrome",
+          "Disease id": "OMIM:190685",
+          "Disease category": "Syndrome",
+          "Disease description": "A chromosomal disorder"
+        },
+        "Case 2": {
+          "Disease name": "Rett syndrome",
+          "Disease id": "OMIM:312750",
+          "Disease category": "Syndrome",
+          "Disease description": "A neurodevelopmental disorder"
+        }
+      }
+    }
+  }
+}
+
+### Test disease-diagnosis - Missing required parameters (error case)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-diagnosis",
+    "arguments": {
+      "original_query": "Test query"
+    }
+  }
+}
+
+### Test disease-diagnosis - Empty extracted_phenotypes (error case)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-diagnosis",
+    "arguments": {
+      "original_query": "Test query",
+      "extracted_phenotypes": {},
+      "disease_cases": {
+        "Case 1": {
+          "Disease name": "Test disease",
+          "Disease id": "OMIM:123456",
+          "Disease category": "Test",
+          "Disease description": "Test description"
+        }
+      }
+    }
+  }
+}
+
+###############################################
+# 6. Error Handling Tests
+###############################################
+
+### Test - Invalid tool name
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "invalid-tool-name",
+    "arguments": {
+      "query": "test"
+    }
+  }
+}
+
+### Test - Missing required parameter
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {}
+  }
+}
+
+### Test - Invalid parameter type
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "test",
+      "top_k": "invalid"
+    }
+  }
+}
+
+###############################################
+# 7. Integration Test - Complete Workflow
+###############################################
+# This demonstrates the typical workflow:
+# 1. Extract phenotypes
+# 2. Extract disease cases
+# 3. Retrieve disease information (optional)
+# 4. Perform diagnosis
+###############################################
+
+### Step 1: Extract phenotypes
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "phenotype-extractor",
+    "arguments": {
+      "query": "A 3-year-old girl with severe intellectual disability, developmental regression, loss of purposeful hand skills, and stereotypic hand movements"
+    }
+  }
+}
+
+### Step 2: Extract disease cases (use output from Step 1)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "extract-disease-cases",
+    "arguments": {
+      "query": "A 3-year-old girl with severe intellectual disability, developmental regression, loss of purposeful hand skills, and stereotypic hand movements",
+      "top_k": 100,
+      "final_top_k": 20
+    }
+  }
+}
+
+### Step 3: Retrieve disease information for top candidates (optional)
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-information-retrieval",
+    "arguments": {
+      "query": "Rett syndrome, Angelman syndrome",
+      "use_model": true
+    }
+  }
+}
+
+### Step 4: Perform diagnosis (use outputs from Steps 1 and 2)
+# Note: Replace the extracted_phenotypes and disease_cases with actual outputs from previous steps
+POST http://{{host}}/mcp/ HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "disease-diagnosis",
+    "arguments": {
+      "original_query": "A 3-year-old girl with severe intellectual disability, developmental regression, loss of purposeful hand skills, and stereotypic hand movements",
+      "extracted_phenotypes": {
+        "HP:0001250,HP:0001249,HP:0001252": {
+          "Intellectual disability": {
+            "hpo_id": "HP:0001250",
+            "phenotype abnormal category": "Abnormality of the nervous system",
+            "synonyms": [],
+            "parent categories": [],
+            "detailed information": ""
+          }
+        }
+      },
+      "disease_cases": {
+        "Case 1": {
+          "Disease name": "Rett syndrome",
+          "Disease id": "OMIM:312750",
+          "Disease category": "Syndrome",
+          "Disease description": "A neurodevelopmental disorder"
+        }
+      }
+    }
+  }
+}

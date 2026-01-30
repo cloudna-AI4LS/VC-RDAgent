@@ -1,0 +1,16 @@
+.DS_Store
+.python-version
+# HPO index generated from hp.obo, exceeds GitHub 100MB limit
+**/hpo_annotations/hp.index
+uv.lock
+*.pyc
+__pycache__/
+.venv/
+.roo
+test.ipynb
+.env
+pathway.R
+server_old.py
+api_server.log
+api_server.pid
+test_online_vs_local_*.py

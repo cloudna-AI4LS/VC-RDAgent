@@ -2,10 +2,15 @@
 
 A Virtual Case Augmented Prompting (VCAP) framework for robust and privacy-preserving rare disease diagnosis. Rare disease diagnosis is hindered by phenotypic heterogeneity and data sparsity; LLM-based support that retrieves real patient records often faces sparse, inconsistent, or privacy-sensitive data. VCAP synthesizes *virtual standardized cases* from knowledge bases (HPO, Orphanet, OMIM, MONDO) instead of real clinical records, enabling privacy-conscious, evidence-grounded diagnostic reasoning.
 
+**Project layout:**
+- `pho2disease/` — Core pipeline: prompt generation, ensemble ranking, phenotype→disease prediction
+- `rare-disease-chat/` — Interactive chat & MCP server (Web UI, terminal CLI, Docker)
+
 ---
 
 ## Features
 
+- **Interactive Chat & MCP Server** — [rare-disease-chat](rare-disease-chat/) subproject: MCP (Model Context Protocol) server for phenotype/disease tools, Web UI, and terminal chat; supports Docker and local install
 - **Multi-step prompt generation** — 2/3-step chain-of-thought prompts with overlap, embedding, or hybrid case extraction
 - **Ensemble disease ranking** — Fuses IC-weighted similarity, annotation-frequency–weighted similarity, and embedding-based similar-case ranking via Z-statistics.
 - **LLM evaluation** — Phenotype-to-disease prediction via local models (e.g. Qwen) or cloud APIs, with Top‑K and similarity metrics
@@ -134,6 +139,25 @@ Set `base_path` in config to your project root:
 |--------|---------|
 | `pho2disease/prompt_config.json` | Prompt generation & ensemble: `input_file`, `phenotype_hpoa`, `obo_file`, `case_library`, `embedding_file`, `ic_file`, Orphanet/MONDO paths |
 | `pho2disease/inference_config.json` | Phenotype→disease prediction: model, API, `case_library`, output paths |
+---
+
+## rare-disease-chat: Interactive Chat & MCP Server
+
+The [rare-disease-chat](rare-disease-chat/) subproject provides an interactive diagnosis interface built on the VCAP pipeline:
+
+- **MCP server** — Exposes phenotype extraction, disease diagnosis, and disease information retrieval as MCP tools
+- **Chat system** — LangGraph-based multi-agent chat with terminal (CLI) and Web UI modes
+- **Deployment** — Docker or local install; Web UI runs at `http://localhost:8080`
+
+**Quick start:**
+
+```bash
+cd rare-disease-chat
+# Option A: Docker — docker-compose up -d mcp-server && docker-compose run --rm chat-system
+# Option B: Local — ./mcp-server/start_server.sh, then ./chat-system/start_web_ui.sh or python phenotype_to_disease_controller_langchain_stream_api.py
+```
+
+See [rare-disease-chat/README.md](rare-disease-chat/README.md) for full setup, LLM configuration, and usage.
 
 ---
 

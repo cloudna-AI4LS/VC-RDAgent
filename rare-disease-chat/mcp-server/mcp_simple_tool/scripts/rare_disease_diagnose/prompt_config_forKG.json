@@ -1,0 +1,32 @@
+{
+  "base_path": "${MCP_SIMPLE_TOOL_DIR}",
+  "pumch_file": "",
+  "max_samples": null,
+  "use_frequency_weights": false,
+  "use_IC_weights": false,
+  "case_extraction_method": "overlap",
+  "use_samples": false,
+  "embedding_resort": false,
+  "top_k": 50,
+  "prompt_steps": 2,
+  "output_file": "",
+  "gpu_id": 2,
+  "sentence_transformer_cache_dir": "{base_path}/data/model_weight",
+  "evaluation_config": {
+    "similarity_threshold": 0.8
+  },
+  "use_kg": true,
+  "kg_api_url": "http://192.168.0.9:5008/nebulasearch/",
+  "kg_api_space": "RDPkg",
+  "kg_api_timeout": 60,
+  "kg_dir": "{base_path}/data/disease_phenotype_kg",
+  "model_config": {
+    "model": "Qwen/Qwen3-8B",
+    "model_provider": "",
+    "base_url": "http://192.168.0.127:8000/v1",
+    "api_key": "EMPTY",
+    "temperature": 0.1,
+    "top_p": 0.95,
+    "streaming": true
+  }
+}

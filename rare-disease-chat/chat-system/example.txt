@@ -1,0 +1,10 @@
+The patient presents with the following phenotypic abnormalities: HP:0000793, HP:0001974, HP:0002205, HP:0002633, HP:0003496, and HP:0100778. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.
+
+The patient presents with the following phenotypic abnormalities: membranoproliferative glomerulonephritis, increased total leukocyte count, recurrent respiratory infections, vasculitis, increased circulating IgM level, and cryoglobulinemia. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.
+
+"HP:0000421", "HP:0002105", "HP:0002113", "HP:0002829", "HP:0002907", "HP:0011227", "HP:0012213", "HP:0032230"
+
+What are the main features of White-Kernohan syndrome?
+
+What diseases are represented by ORPHA:397, OMIM:253800, and OMIM:153400?
+

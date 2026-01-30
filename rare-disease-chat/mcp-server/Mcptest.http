@@ -1,0 +1,408 @@
+@host = localhost:3000
+@requestId = 1
+
+### 监听结果 (需保持连接)
+GET http://{{host}}/mcp
+Accept: text/event-stream
+
+### 1. 提示词
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "reports",
+    "arguments": {
+      "action": "list"
+    }
+  }
+}
+
+### 1. 提示词
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "reports",
+    "arguments": {
+      "action": "search",
+      "query": "BIOMARKER_RESEARCH"
+    }
+  }
+}
+
+### 1. 提示词
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "reports",
+    "arguments": {
+      "action": "save",
+      "filename": "analysis_report",
+      "summary": "数据分析报告模板",
+      "content": "# 分析报告\n\n请按以下结构分析..."
+    }
+  }
+}
+
+### 1. 判断符号类型 (judge-symbol)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "judge-symbol",
+    "arguments": {
+      "symbols": ["TP53", "Q03113", "BRCA1", "P12345"]
+    }
+  }
+}
+
+### 2. 查询蛋白质符号 (query-protein-symbol)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-protein-symbol",
+    "arguments": {
+      "geneSymbols": ["NME1", "GNA12", "TP53"]
+    }
+  }
+}
+
+### 3. 查询基因符号 (query-gene-symbol)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-gene-symbol",
+    "arguments": {
+      "proteinSymbols": ["P04637", "Q00987", "P12345"]
+    }
+  }
+}
+
+### 4. 符号转换 (query-symbol-conversion)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-symbol-conversion",
+    "arguments": {
+      "symbols": ["TP53", "P04637", "BRCA1"]
+    }
+  }
+}
+
+### 5. 查询通路信息 (query-pathway-info)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-pathway-info",
+    "arguments": {
+      "symbols": ["TP53", "MDM2", "P04637"]
+    }
+  }
+}
+
+### 6. 查询共同通路 (query-common-pathway)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-common-pathway",
+    "arguments": {
+      "symbol1": "P04637",
+      "symbol2": "Q00987"
+    }
+  }
+}
+
+### 7. 查询分子功能 (query-molecular-function)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-molecular-function",
+    "arguments": {
+      "symbols": ["TP53", "MDM2"]
+    }
+  }
+}
+
+### 8. 查询生物学过程 (query-biological-process)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-biological-process",
+    "arguments": {
+      "symbols": ["TP53", "MDM2"]
+    }
+  }
+}
+
+### 9. 查询共同生物学过程 (query-common-biological-process)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-common-biological-process",
+    "arguments": {
+      "symbol1": "TP53",
+      "symbol2": "MDM2"
+    }
+  }
+}
+
+### 10. 查询文献信息 ()
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-pubmed-info",
+    "arguments": {
+      "Symbols": ["TP53", "P38398", "KPNA2"],
+      "keywords": "breast cancer",
+      "size": 3
+    }
+  }
+}
+
+### 11. 查询共同相互作用 (query-common-interactions)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-common-interactions",
+    "arguments": {
+      "symbol1": "TP53",
+      "symbol2": "MDM2"
+    }
+  }
+}
+
+### 12. 查询复合物信息 (query-complex-info)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-complex-info",
+    "arguments": {
+      "symbols": ["TP53", "MDM2"]
+    }
+  }
+}
+
+### 13. 查询共同复合物 (query-common-complex)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-common-complex",
+    "arguments": {
+      "symbol1": "TP53",
+      "symbol2": "MDM2"
+    }
+  }
+}
+
+### 14. 查询抗体位置信息 (query-antibody-location)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-antibody-location",
+    "arguments": {
+      "symbols": ["Q13315", "Q99728", "Q9BX63", "Q9NYV4", "O14757"]
+    }
+  }
+}
+
+### 15. 查询基因相关疾病 (query-gene-disease)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-gene-disease",
+    "arguments": {
+      "symbols": ["TP53"]
+    }
+  }
+}
+
+### 16. 查询基因家族 (query-gene-family)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-gene-family",
+    "arguments": {
+      "symbols": ["TP53"]
+    }
+  }
+}
+
+### 17. 查询PubMed文献信息 (query-pubmed-info)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "query-pubmed-info",
+    "arguments": {
+      "geneSymbol": ["ACOT8", "UGT2A1", "SLC35F5", "SLC47A2"],
+      "keywords": "Hepatocellular Carcinoma",
+      "size": 5
+    }
+  }
+}
+
+
+### 20. 计算通路相似性 (calculate-pathway-similarity)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "calculate-pathway-similarity",
+    "arguments": {
+      "proteinSymbols": ["P04637", "Q00987"]
+    }
+  }
+}
+
+
+### 22. 启动通知流 (test)
+POST http://{{host}}/mcp HTTP/1.1
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": {{requestId}},
+  "method": "tools/call",
+  "params": {
+    "name": "test",
+    "arguments": {
+      "interval": 1.0,
+      "count": 5,
+      "caller": "test-client"
+    }
+  }
+}
+
+### 23. 列出所有可用工具
+POST http://{{host}}/mcp/
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}

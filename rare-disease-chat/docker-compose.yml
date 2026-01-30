@@ -1,0 +1,60 @@
+version: '3.8'
+
+networks:
+  rarellm-network:
+    name: rarellm-network
+    driver: bridge
+
+services:
+  # MCP server service
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    image: rarellm-mcp-server:latest
+    container_name: rarellm-mcp-server
+    networks:
+      - rarellm-network
+    ports:
+      - "3000:3000"
+    environment:
+      - PROJECT_ROOT=/app
+      - MCP_SIMPLE_TOOL_DIR=/app/mcp_simple_tool
+      - PORT=3000
+      - MCP_ENDPOINT=http://localhost:3000/mcp/
+      - HF_ENDPOINT=https://hf-mirror.com
+    volumes:
+      # Mount data directory (for persistence)
+      - ./mcp-server/mcp_simple_tool/data:/app/mcp_simple_tool/data
+    command: python -m mcp_simple_tool.server --port 3000 --json-response
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -s -X POST http://localhost:3000/mcp/ -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}' | grep -q '\"result\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Chat system service (start mcp-server first)
+  chat-system:
+    build:
+      context: ./chat-system
+      dockerfile: Dockerfile
+    image: rarellm-chat-system:latest
+    container_name: rarellm-chat-system
+    depends_on:
+      - mcp-server
+    networks:
+      - rarellm-network
+    environment:
+      - PROJECT_ROOT=/app
+      - MCP_ENDPOINT=http://mcp-server:3000/mcp/
+      - MCP_TIMEOUT=600
+      - HF_ENDPOINT=https://hf-mirror.com
+    volumes:
+      # Mount project directory for script access
+      - ./chat-system:/app
+    command: python phenotype_to_disease_controller_langchain_stream_api.py
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
