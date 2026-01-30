@@ -33,7 +33,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 
 ### 2. HPO annotations (`hpo_annotations/`)
 
-[Human Phenotype Ontology](https://hpo.jax.org/) and disease–phenotype / gene–phenotype mappings.
+[Human Phenotype Ontology](https://hpo.jax.org/data/annotations) and disease–phenotype / gene–phenotype mappings.
 
 | File | Description |
 |------|-------------|
@@ -46,7 +46,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 
 ### 3. Orphanet (`orphanet_annotations/`)
 
-[Orphanet](https://www.orphadata.com/) rare diseases and HPO phenotype associations.
+[Orphanet](https://sciences.orphadata.com/orphanet-scientific-knowledge-files/) rare diseases and HPO phenotype associations.
 
 | File | Description |
 |------|-------------|
@@ -57,7 +57,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 
 ### 4. MONDO (`mondo_annotations/`)
 
-[MONDO Disease Ontology](https://mondo.monarchinitiative.org/) for ID alignment and rare-disease tagging.
+[MONDO Disease Ontology](https://monarchinitiative.org/kg/downloads) for ID alignment and rare-disease tagging.
 
 | File | Description |
 |------|-------------|

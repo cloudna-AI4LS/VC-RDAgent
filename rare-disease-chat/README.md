@@ -329,7 +329,10 @@ rare-disease-chat/               # Project root (this README)
 │   │   │       ├── query_kg.py                       # KG query & phenotype-to-disease prompt generation
 │   │   │       ├── disease_scraper/                  # Disease info scraper
 │   │   │       └── prompt_config_forKG.json         # KG prompt config
-│   │   └── data/                # Data files
+│   │   └── data/                # Data files (source: VCAP-RDAgent repo, see below)
+│   │       ├── disease_annotations/   # ← VCAP-RDAgent/general_cases/disease_ids_names.json
+│   │       ├── disease_phenotype_kg/  # ← VCAP-RDAgent/disease_phenotype_kg/ (*.csv)
+│   │       └── hpo_annotations/       # ← VCAP-RDAgent/hpo_annotations/ (e.g. hp.obo)
 │   ├── start_server.sh          # Start script
 │   └── stop_server.sh           # Stop script
 ├── chat-system/                 # Chat system
@@ -348,6 +351,18 @@ rare-disease-chat/               # Project root (this README)
 │   └── WEB_UI_README.md         # Web UI guide
 └── ...
 ```
+
+**Data source:** The files under `mcp-server/mcp_simple_tool/data/` are provided by or derived from the parent repository **VCAP-RDAgent**. Corresponding paths:
+
+| Local path (`mcp_simple_tool/data/`) | Source in VCAP-RDAgent |
+|--------------------------------------|------------------------|
+| `disease_annotations/disease_ids_names.json` | `general_cases/disease_ids_names.json` |
+| `disease_phenotype_kg/*.csv` | `disease_phenotype_kg/` |
+| `hpo_annotations/hp.obo` | `hpo_annotations/` |
+
+Copy or symlink these from the VCAP-RDAgent root if you are building from a fresh clone.
+
+**First run:** The file `hp.index` is built under `mcp_simple_tool/data/hpo_annotations/` on first use (HPO phenotype index for search). This one-time build can take a long time; please wait for it to finish.
 
 ## Scripts
 
