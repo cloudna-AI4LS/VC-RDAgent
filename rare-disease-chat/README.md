@@ -10,13 +10,19 @@ MCP (Model Context Protocol) server for rare disease diagnosis, phenotype analys
 
 ## Quick Start
 
-Choose one of two installation methods: **Option A (Docker)** or **Option B (Local)**. Both support terminal Chat; **Web UI** is documented separately and works with either.
+Choose one of two ways to run: **Option A (Docker)** or **Option B (Local)**. Both support terminal Chat; **Web UI** is only available in Option B (Local).
+
+**Config (both options):** Edit the variables at the top of **`set_config.sh`** (in this directory). MCP and chat-system have **separate sections** (e.g. `MCP_LLM_*` and `CHAT_LLM_*`), so they can use different models/URLs. Run **`./set_config.sh`** to write both config files, or **`MCP_ONLY=1 ./set_config.sh`** / **`CHAT_ONLY=1 ./set_config.sh`** to update only one. Config paths:
+- MCP: `mcp-server/mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json`
+- Chat: `chat-system/inference_config.json`
+
+After that, **Option A** uses those config files when building/starting Docker; **Option B** uses them when you run `start_server.sh` and `start_dashboard.sh`.
 
 ---
 
 ### Option A: Docker install and run
 
-In Docker mode, MCP server and Chat run in containers; Chat supports terminal (CLI) only—no Web UI.
+In Docker mode you **must** have the two config files set (e.g. run **`./set_config.sh`** once from this directory, or edit the two JSON files manually). Then build and run with Docker. Chat in Docker is terminal (CLI) only—no Web UI.
 
 The project uses two separate Docker images:
 - **MCP server image** (`rarellm-mcp-server:latest`) – provides tool services
@@ -144,15 +150,11 @@ docker network rm rarellm-network  # optional: remove network
 
 ### Option B: Local install and run
 
-In local mode, MCP server and Chat run on the host; Chat supports both terminal (CLI) and Web UI.
+In local mode, run **`./set_config.sh`** once (after editing its top variables) to write both config files. Then run `start_server.sh` and `start_dashboard.sh`. Chat supports **two modes**: Web UI (RDAgent Dashboard) and CLI (terminal).
 
 #### Start the server
 
-> **Note**: In this document, `$PROJECT_ROOT` refers to the project root (this directory `rare-disease-chat`). Set these environment variables before use:
-> ```bash
-> export PROJECT_ROOT=<path-to-project-root>
-> export MCP_SIMPLE_TOOL_DIR=$PROJECT_ROOT/mcp-server/mcp_simple_tool
-> ```
+> **Note**: Set `PROJECT_ROOT` and `MCP_SIMPLE_TOOL_DIR` before use (see top of this README).
 
 1. **Go to project directory**
    ```bash
@@ -217,31 +219,26 @@ Ensure the MCP server is running first (see "Start the server" above).
 
 2. **Choose one of two modes**:
 
-   **Option A: Web UI (RDAgent Dashboard)** (recommended)
+   **Mode (a): Web UI (RDAgent Dashboard)** (recommended)
    ```bash
    ./start_dashboard.sh
    ```
    Or: `python rdagent_dashboard_api.py`  
    Open http://localhost:8080/rdagent/ in your browser. See [chat-system/WEB_UI_README.md](chat-system/WEB_UI_README.md) for details.
 
-   **Option B: CLI (terminal chat)**
+   **Mode (b): CLI (terminal chat)**
    ```bash
    python phenotype_to_disease_controller_langchain_stream_api.py
    ```
    Type `quit` to exit, `clear` to clear chat history.
 
-After startup, the system supports:
+After startup (either option), the system supports:
 - Phenotype extraction and symptom analysis
 - Disease diagnosis and case extraction
 - Disease information retrieval and normalization
 - Multi-turn conversation memory
 
 ---
-
-### Web UI (RDAgent Dashboard)
-
-Web UI runs on your machine and connects to MCP server at `http://localhost:3000`. **Prerequisites**: MCP server must be running (Docker or local, port 3000).  
-Use **start_dashboard.sh** (or `python rdagent_dashboard_api.py`); open **http://localhost:8080/rdagent/** in your browser. See [chat-system/WEB_UI_README.md](chat-system/WEB_UI_README.md) for details.
 
 ## Requirements
 
@@ -291,36 +288,36 @@ Example:
 
 Environment variables are replaced with actual paths when the config is loaded.
 
-### LLM configuration (start scripts)
+### LLM / model configuration (set_config.sh)
 
-Both `mcp-server/start_server.sh` and `chat-system/start_dashboard.sh` write LLM settings into their config files before starting. Edit the variables at the top of each script to point to your inference server:
+**`set_config.sh`** has two sections: **MCP** (`MCP_LLM_*`, `MCP_KG_API_URL`) and **chat-system** (`CHAT_LLM_*`). They can use different values. Edit the variables at the top, then run **`./set_config.sh`** to write both config files, or **`MCP_ONLY=1 ./set_config.sh`** / **`CHAT_ONLY=1 ./set_config.sh`** to update only one.
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `LLM_MODEL` | Model name | `Qwen/Qwen3-8B` |
-| `LLM_BASE_URL` | Inference API base URL | `http://192.168.0.127:8000/v1` |
-| `LLM_API_KEY` | API key (use `EMPTY` for local) | `EMPTY` |
-| `LLM_MODEL_PROVIDER` | Provider (empty for OpenAI-compatible API) | *(empty)* |
-| `LLM_TEMPERATURE` | Sampling temperature | `0.1` |
-| `LLM_TOP_P` | Top-p sampling | `0.95` |
-| `LLM_STREAMING` | Enable streaming | `true` |
+| Variable (MCP / Chat) | Description | Example |
+|----------------------|-------------|---------|
+| `MCP_LLM_MODEL` / `CHAT_LLM_MODEL` | Model name | `Qwen/Qwen3-8B` |
+| `MCP_LLM_BASE_URL` / `CHAT_LLM_BASE_URL` | Inference API base URL | `http://192.168.0.127:8000/v1` |
+| `MCP_LLM_API_KEY` / `CHAT_LLM_API_KEY` | API key (use `EMPTY` for local) | `EMPTY` |
+| `MCP_LLM_MODEL_PROVIDER` / `CHAT_LLM_MODEL_PROVIDER` | Provider (empty for OpenAI-compatible) | *(empty)* |
+| `MCP_LLM_TEMPERATURE` / `CHAT_LLM_TEMPERATURE` | Sampling temperature | `0.1` |
+| `MCP_LLM_TOP_P` / `CHAT_LLM_TOP_P` | Top-p sampling | `0.95` |
+| `MCP_LLM_STREAMING` / `CHAT_LLM_STREAMING` | Enable streaming | `true` |
+| `MCP_KG_API_URL` | KG API URL (MCP only) | `http://192.168.0.9:5008/nebulasearch/` |
 
-- **MCP server** (local run): values are written by `start_server.sh` to `mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json`
-- **Web UI** (local run): values are written by `start_web_ui.sh` to `chat-system/inference_config.json`
-
-**When not using the start scripts** (e.g. Docker or direct run), edit the config files manually:
-- **Docker MCP server**: edit `prompt_config_forKG.json` before building/starting the container
-- **Terminal chat** (Docker or local): edit `chat-system/inference_config.json` before building/starting the chat system
+- **Local:** Run `./set_config.sh` (or with `MCP_ONLY=1` / `CHAT_ONLY=1`), then run `mcp-server/start_server.sh` and/or `chat-system/start_dashboard.sh`.
+- **Docker:** Run `./set_config.sh` before building/starting, or edit the two JSON config files manually.
 
 ## Project structure
 
 ```
 rare-disease-chat/               # Project root (this README)
 ├── README.md                    # This file
+├── set_config.sh                # Edit MCP_* and CHAT_* vars; run to write one or both configs
 ├── docker-compose.yml           # Docker Compose config
 ├── mcp-server/                  # MCP server
 │   ├── README.md                # MCP server API and usage
 │   ├── Dockerfile               # MCP server image
+│   ├── start_server.sh          # Start script
+│   ├── stop_server.sh           # Stop script
 │   ├── mcp_simple_tool/         # Core tool module
 │   │   ├── tools/               # Tool implementations
 │   │   ├── scripts/             # Helper scripts
@@ -333,15 +330,13 @@ rare-disease-chat/               # Project root (this README)
 │   │       ├── disease_annotations/   # ← VCAP-RDAgent/general_cases/disease_ids_names.json
 │   │       ├── disease_phenotype_kg/  # ← VCAP-RDAgent/disease_phenotype_kg/ (*.csv)
 │   │       └── hpo_annotations/       # ← VCAP-RDAgent/hpo_annotations/ (e.g. hp.obo)
-│   ├── start_server.sh          # Start script
-│   └── stop_server.sh           # Stop script
 ├── chat-system/                 # Chat system
 │   ├── README.md                # Chat system overview; see parent README for full overview
 │   ├── Dockerfile               # Chat system image
 │   ├── phenotype_to_disease_controller_langchain_stream_api.py  # Core controller (CLI chat)
 │   ├── rdagent_dashboard_api.py # RDAgent Dashboard backend (recommended Web UI)
 │   ├── start_dashboard.sh      # Start RDAgent Dashboard
-│   ├── inference_config.json    # LLM inference config (written by start_dashboard.sh)
+│   ├── inference_config.json    # LLM config (written by set_config.sh)
 │   ├── main.py                  # Entry point
 │   ├── pyproject.toml           # Dependencies
 │   ├── rdagent/                 # Web UI frontend

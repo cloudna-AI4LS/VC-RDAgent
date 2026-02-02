@@ -16,7 +16,7 @@
     "similarity_threshold": 0.8
   },
   "use_kg": true,
-  "kg_api_url": "http://192.168.0.9:5008/nebulasearch/",
+  "kg_api_url": "",
   "kg_api_space": "RDPkg",
   "kg_api_timeout": 60,
   "kg_dir": "{base_path}/data/disease_phenotype_kg",

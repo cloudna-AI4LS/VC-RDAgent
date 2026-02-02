@@ -139,6 +139,7 @@ class WorkflowStatusCallback:
 async def controller_pipeline_stream_en(
     user_query: str,
     conversation_messages: List[BaseMessage] | None = None,
+    disease_diagnosis_retry: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming version of the controller pipeline for the English UI.
@@ -396,21 +397,39 @@ async def controller_pipeline_stream_en(
             task_type = "disease_diagnosis"
 
         if task_type == "disease_diagnosis" and workflow_info.get("workflow") is None:
-            yield json.dumps(
-                {
-                    "type": "status",
-                    "data": "Disease diagnosis is required but was not executed. Restarting diagnosis workflow...",
-                    "phase": "classification",
-                }
-            ) + "\n"
+            if disease_diagnosis_retry:
+                # Already retried once with enhanced_query; return error as workflow tool result
+                workflow_result_msg = "Disease diagnosis workflow was not executed. Please try rephrasing or call the diagnosis tool explicitly."
+                workflow_info["workflow"] = "disease_diagnosis_tool"
+                workflow_info["result"] = workflow_result_msg
+                all_tool_results["disease_diagnosis_tool"] = workflow_result_msg
+                completed_tools.append("disease_diagnosis_tool")
+                tool_call_counts["disease_diagnosis_tool"] = tool_call_counts.get("disease_diagnosis_tool", 0) + 1
+                yield json.dumps(
+                    {
+                        "type": "tool_response",
+                        "tool_name": "disease_diagnosis_tool",
+                        "data": workflow_result_msg,
+                    },
+                    ensure_ascii=False,
+                ) + "\n"
+                # Fall through to Phase 4/5 so this result is used in evaluation/synthesis
+            else:
+                yield json.dumps(
+                    {
+                        "type": "status",
+                        "data": "Disease diagnosis is required but was not executed. Restarting diagnosis workflow...",
+                        "phase": "classification",
+                    }
+                ) + "\n"
 
-            enhanced_query = f"""{user_query}
+                enhanced_query = f"""{user_query}
 
-**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_case_extractor_tool to obtain disease cases, and MUST call the disease_diagnosis_tool to perform the diagnosis analysis.**"""
+**IMPORTANT: This query requires disease diagnosis. You MUST call the **disease_case_extractor_tool** to obtain disease cases, and MUST call the workflow tool **disease_diagnosis_tool** to perform the diagnosis analysis.**"""
 
-            async for chunk in controller_pipeline_stream_en(enhanced_query, conversation_messages):
-                yield chunk
-            return
+                async for chunk in controller_pipeline_stream_en(enhanced_query, conversation_messages, disease_diagnosis_retry=True):
+                    yield chunk
+                return
 
         # Phase 4: Evaluation (moved right after workflow; final_response uses workflow result)
         evaluation_response_clean = ""

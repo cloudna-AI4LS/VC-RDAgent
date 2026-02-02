@@ -1267,7 +1267,6 @@ User Query:
 Available workflows:
 {workflow_info}
 
-Call workflow tool ONLY if query needs workflow execution. Otherwise respond "No workflow tool needed".
 """
         
         messages = []
