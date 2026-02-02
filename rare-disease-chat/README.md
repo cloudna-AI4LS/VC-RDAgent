@@ -217,12 +217,12 @@ Ensure the MCP server is running first (see "Start the server" above).
 
 2. **Choose one of two modes**:
 
-   **Option A: Web UI** (recommended)
+   **Option A: Web UI (RDAgent Dashboard)** (recommended)
    ```bash
-   ./start_web_ui.sh
+   ./start_dashboard.sh
    ```
-   Or: `python web_ui_api.py` (Chinese) / `python web_ui_api_en.py` (English).  
-   Open http://localhost:8080 in your browser. See [chat-system/WEB_UI_README.md](chat-system/WEB_UI_README.md) for details.
+   Or: `python rdagent_dashboard_api.py`  
+   Open http://localhost:8080/rdagent/ in your browser. See [chat-system/WEB_UI_README.md](chat-system/WEB_UI_README.md) for details.
 
    **Option B: CLI (terminal chat)**
    ```bash
@@ -238,10 +238,10 @@ After startup, the system supports:
 
 ---
 
-### Web UI
+### Web UI (RDAgent Dashboard)
 
 Web UI runs on your machine and connects to MCP server at `http://localhost:3000`. **Prerequisites**: MCP server must be running (Docker or local, port 3000).  
-See "Start the chat system" > Option A above for Web UI setup and run instructions.
+Use **start_dashboard.sh** (or `python rdagent_dashboard_api.py`); open **http://localhost:8080/rdagent/** in your browser. See [chat-system/WEB_UI_README.md](chat-system/WEB_UI_README.md) for details.
 
 ## Requirements
 
@@ -293,7 +293,7 @@ Environment variables are replaced with actual paths when the config is loaded.
 
 ### LLM configuration (start scripts)
 
-Both `mcp-server/start_server.sh` and `chat-system/start_web_ui.sh` write LLM settings into their config files before starting. Edit the variables at the top of each script to point to your inference server:
+Both `mcp-server/start_server.sh` and `chat-system/start_dashboard.sh` write LLM settings into their config files before starting. Edit the variables at the top of each script to point to your inference server:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -308,7 +308,7 @@ Both `mcp-server/start_server.sh` and `chat-system/start_web_ui.sh` write LLM se
 - **MCP server** (local run): values are written by `start_server.sh` to `mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json`
 - **Web UI** (local run): values are written by `start_web_ui.sh` to `chat-system/inference_config.json`
 
-**When not using the start scripts** (e.g. Docker or direct run), you must edit the config files manually:
+**When not using the start scripts** (e.g. Docker or direct run), edit the config files manually:
 - **Docker MCP server**: edit `prompt_config_forKG.json` before building/starting the container
 - **Terminal chat** (Docker or local): edit `chat-system/inference_config.json` before building/starting the chat system
 
@@ -339,15 +339,13 @@ rare-disease-chat/               # Project root (this README)
 │   ├── README.md                # Chat system overview; see parent README for full overview
 │   ├── Dockerfile               # Chat system image
 │   ├── phenotype_to_disease_controller_langchain_stream_api.py  # Core controller (CLI chat)
-│   ├── web_ui_api.py            # Web UI backend (Chinese)
-│   ├── web_ui_api_en.py         # Web UI backend (English)
-│   ├── start_web_ui.sh          # Web UI startup script
-│   ├── inference_config.json    # LLM inference config
+│   ├── rdagent_dashboard_api.py # RDAgent Dashboard backend (recommended Web UI)
+│   ├── start_dashboard.sh      # Start RDAgent Dashboard
+│   ├── inference_config.json    # LLM inference config (written by start_dashboard.sh)
 │   ├── main.py                  # Entry point
 │   ├── pyproject.toml           # Dependencies
 │   ├── rdagent/                 # Web UI frontend
-│   │   ├── index.html           # Chinese frontend
-│   │   └── index_en.html        # English frontend
+│   │   └── rdagent_dashboard.html  # RDAgent Dashboard frontend
 │   └── WEB_UI_README.md         # Web UI guide
 └── ...
 ```

@@ -91,6 +91,15 @@ def _require_called_by_index_en(request: Request) -> None:
     # Allow the request in both cases
 
 
+def _tool_result_to_str(obj: Any) -> str:
+    """Serialize tool result for dashboard tool_response display."""
+    if obj is None:
+        return ""
+    if isinstance(obj, (dict, list)):
+        return json.dumps(obj, ensure_ascii=False, indent=2)
+    return str(obj)
+
+
 def translate_workflow_status_en(status_msg: str) -> str:
     """Convert WorkflowAgent status messages into user-friendly English UI text."""
     if status_msg.startswith("Executing "):
@@ -140,6 +149,67 @@ async def controller_pipeline_stream_en(
     try:
         start_time = time.time()
 
+        completed_tools: List[str] = []
+        tool_call_counts: Dict[str, int] = {}
+        all_tool_results: Dict[str, Any] = {}
+
+        # Phase 0: Task type first (same classify_task_type as before, input = history + current query)
+        yield json.dumps(
+            {
+                "type": "status",
+                "data": "Identifying task type...",
+                "phase": "classification",
+            }
+        ) + "\n"
+        # Build context = history + current user query for classify_task_type
+        parts = []
+        if conversation_messages:
+            for msg in conversation_messages:
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                content = getattr(msg, "content", None) or ""
+                parts.append(f"{role}: {content}")
+        parts.append(f"User (current): {user_query}")
+        context_str = "\n\n".join(parts)
+        task_type = await classify_task_type(user_query, context_str)
+        task_type_names = {
+            "general_inquiry": "General inquiry",
+            "phenotype_extraction": "Phenotype extraction",
+            "disease_diagnosis": "Disease diagnosis",
+            "disease_case_extraction": "Disease case extraction",
+            "disease_information_retrieval": "Disease information retrieval",
+        }
+        task_type_display = task_type_names.get(task_type, task_type)
+        yield json.dumps(
+            {
+                "type": "status",
+                "data": f"[Completed] Task type: {task_type_display}",
+                "phase": "classification",
+            }
+        ) + "\n"
+
+        # Reject general inquiry to avoid abuse of computing resources
+        if task_type == "general_inquiry":
+            reject_msg = (
+                "This system only supports **rare disease diagnosis related** queries. "
+                "Please ask questions about phenotype extraction, disease diagnosis, disease case extraction, or disease information retrieval. "
+                "General or off-topic questions are not supported."
+            )
+            yield json.dumps(
+                {"type": "content", "data": reject_msg, "phase": "classification"},
+                ensure_ascii=False,
+            ) + "\n"
+            yield json.dumps(
+                {
+                    "type": "status",
+                    "data": "[Completed] General inquiry rejected",
+                    "phase": "complete",
+                }
+            ) + "\n"
+            yield json.dumps(
+                {"type": "done", "data": "", "phase": "complete"},
+            ) + "\n"
+            return
+
         # Phase 1: InfoExtractionAgent
         yield json.dumps(
             {
@@ -148,10 +218,6 @@ async def controller_pipeline_stream_en(
                 "phase": "info_extraction",
             }
         ) + "\n"
-
-        completed_tools: List[str] = []
-        tool_call_counts: Dict[str, int] = {}
-        all_tool_results: Dict[str, Any] = {}
 
         info_extraction_agent = InfoExtractionAgent()
         info_extraction_results = await info_extraction_agent.run(
@@ -163,6 +229,16 @@ async def controller_pipeline_stream_en(
             tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
 
         all_tool_results.update(info_extraction_results)
+
+        for _name, _result in info_extraction_results.items():
+            yield json.dumps(
+                {
+                    "type": "tool_response",
+                    "tool_name": _name,
+                    "data": _tool_result_to_str(_result),
+                },
+                ensure_ascii=False,
+            ) + "\n"
 
         yield json.dumps(
             {
@@ -183,6 +259,16 @@ async def controller_pipeline_stream_en(
 
         workflow_status_messages: List[str] = []
         workflow_status_callback = WorkflowStatusCallback(workflow_status_messages)
+        yielded_workflow_status: set = set()  # avoid duplicate status lines
+
+        def get_workflow_status_chunk(data: str) -> Optional[str]:
+            key = ("workflow", data)
+            if key in yielded_workflow_status:
+                return None
+            yielded_workflow_status.add(key)
+            return json.dumps(
+                {"type": "status", "data": data, "phase": "workflow"},
+            ) + "\n"
 
         workflow_agent = WorkflowAgent()
         workflow_task = asyncio.create_task(
@@ -198,26 +284,18 @@ async def controller_pipeline_stream_en(
         while not workflow_task.done():
             if len(workflow_status_messages) > last_status_count:
                 for i in range(last_status_count, len(workflow_status_messages)):
-                    yield json.dumps(
-                        {
-                            "type": "status",
-                            "data": workflow_status_messages[i],
-                            "phase": "workflow",
-                        }
-                    ) + "\n"
+                    chunk = get_workflow_status_chunk(workflow_status_messages[i])
+                    if chunk is not None:
+                        yield chunk
                 last_status_count = len(workflow_status_messages)
 
             await asyncio.sleep(0.01)
 
         if len(workflow_status_messages) > last_status_count:
             for i in range(last_status_count, len(workflow_status_messages)):
-                yield json.dumps(
-                    {
-                        "type": "status",
-                        "data": workflow_status_messages[i],
-                        "phase": "workflow",
-                    }
-                ) + "\n"
+                chunk = get_workflow_status_chunk(workflow_status_messages[i])
+                if chunk is not None:
+                    yield chunk
 
         workflow_info = await workflow_task
 
@@ -240,6 +318,14 @@ async def controller_pipeline_stream_en(
                 if tool_name not in completed_tools:
                     completed_tools.append(tool_name)
                 tool_call_counts[tool_name] = tool_call_counts.get(tool_name, 0) + 1
+                yield json.dumps(
+                    {
+                        "type": "tool_response",
+                        "tool_name": tool_name,
+                        "data": _tool_result_to_str(result),
+                    },
+                    ensure_ascii=False,
+                ) + "\n"
 
             yield json.dumps(
                 {
@@ -259,6 +345,7 @@ async def controller_pipeline_stream_en(
 
             workflow_status_messages.clear()
             last_status_count = 0
+            yielded_workflow_status.clear()
 
             workflow_agent = WorkflowAgent()
             workflow_task = asyncio.create_task(
@@ -273,65 +360,40 @@ async def controller_pipeline_stream_en(
             while not workflow_task.done():
                 if len(workflow_status_messages) > last_status_count:
                     for i in range(last_status_count, len(workflow_status_messages)):
-                        yield json.dumps(
-                            {
-                                "type": "status",
-                                "data": workflow_status_messages[i],
-                                "phase": "workflow",
-                            }
-                        ) + "\n"
+                        chunk = get_workflow_status_chunk(workflow_status_messages[i])
+                        if chunk is not None:
+                            yield chunk
                     last_status_count = len(workflow_status_messages)
 
                 await asyncio.sleep(0.05)
 
             if len(workflow_status_messages) > last_status_count:
                 for i in range(last_status_count, len(workflow_status_messages)):
-                    yield json.dumps(
-                        {
-                            "type": "status",
-                            "data": workflow_status_messages[i],
-                            "phase": "workflow",
-                        }
-                    ) + "\n"
+                    chunk = get_workflow_status_chunk(workflow_status_messages[i])
+                    if chunk is not None:
+                        yield chunk
 
             workflow_info = await workflow_task
 
         if workflow_info.get("workflow") is not None:
-            all_tool_results[workflow_info["workflow"]] = workflow_info["result"]
-            completed_tools.append(workflow_info["workflow"])
-            tool_call_counts[workflow_info["workflow"]] = (
-                tool_call_counts.get(workflow_info["workflow"], 0) + 1
-            )
+            wf_name = workflow_info["workflow"]
+            wf_result = workflow_info["result"]
+            all_tool_results[wf_name] = wf_result
+            completed_tools.append(wf_name)
+            tool_call_counts[wf_name] = tool_call_counts.get(wf_name, 0) + 1
             yield json.dumps(
                 {
-                    "type": "status",
-                    "data": "[Completed] Disease diagnosis analysis",
-                    "phase": "workflow",
-                }
+                    "type": "tool_response",
+                    "tool_name": wf_name,
+                    "data": _tool_result_to_str(wf_result),
+                },
+                ensure_ascii=False,
             ) + "\n"
-        else:
-            yield json.dumps(
-                {
-                    "type": "status",
-                    "data": "[Completed] No disease diagnosis required for this query",
-                    "phase": "workflow",
-                }
-            ) + "\n"
+        # Completion status already sent via workflow_status_callback; avoid duplicate status log.
 
-        # Phase 3: Task classification (moved before evaluation/synthesis)
-        yield json.dumps(
-            {
-                "type": "status",
-                "data": "Identifying task type...",
-                "phase": "classification",
-            }
-        ) + "\n"
-
+        # Override task_type when workflow actually ran disease_diagnosis_tool
         if workflow_info.get("workflow") == "disease_diagnosis_tool":
             task_type = "disease_diagnosis"
-        else:
-            workflow_result_text = str(workflow_info.get("result", "") or "")
-            task_type = await classify_task_type(user_query, workflow_result_text)
 
         if task_type == "disease_diagnosis" and workflow_info.get("workflow") is None:
             yield json.dumps(
@@ -344,28 +406,11 @@ async def controller_pipeline_stream_en(
 
             enhanced_query = f"""{user_query}
 
-**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_diagnosis_tool to perform the diagnosis analysis.**"""
+**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_case_extractor_tool to obtain disease cases, and MUST call the disease_diagnosis_tool to perform the diagnosis analysis.**"""
 
             async for chunk in controller_pipeline_stream_en(enhanced_query, conversation_messages):
                 yield chunk
             return
-
-        task_type_names = {
-            "general_inquiry": "General inquiry",
-            "phenotype_extraction": "Phenotype extraction",
-            "disease_diagnosis": "Disease diagnosis",
-            "disease_case_extraction": "Disease case extraction",
-            "disease_information_retrieval": "Disease information retrieval",
-        }
-        task_type_display = task_type_names.get(task_type, task_type)
-
-        yield json.dumps(
-            {
-                "type": "status",
-                "data": f"[Completed] Task type: {task_type_display}",
-                "phase": "classification",
-            }
-        ) + "\n"
 
         # Phase 4: Evaluation (moved right after workflow; final_response uses workflow result)
         evaluation_response_clean = ""

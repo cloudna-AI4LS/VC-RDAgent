@@ -318,7 +318,7 @@ async def controller_pipeline_stream(
             # 修改用户查询，添加强调信息
             enhanced_query = f"""{user_query}
 
-**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_diagnosis_tool to perform the diagnosis analysis."""
+**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_case_extractor_tool to obtain disease cases, and MUST call the disease_diagnosis_tool to perform the diagnosis analysis."""
             
             # 递归调用，开启下一轮推理（直接继续流式输出，不发送done）
             async for chunk in controller_pipeline_stream(enhanced_query, conversation_messages):

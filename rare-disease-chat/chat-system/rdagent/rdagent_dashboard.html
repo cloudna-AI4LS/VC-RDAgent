@@ -1,0 +1,1464 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        :root {
+            /* 浅色系 - 参考主流 AI Chat 页面 (ChatGPT / Claude 等) */
+            --bg-dark: #f5f7fa;
+            --bg-panel: #ffffff;
+            --bg-card: #ffffff;
+            --border: #e5e7eb;
+            --text: #1f2937;
+            --text-muted: #6b7280;
+            --accent: #2563eb;
+            --accent-dim: rgba(37, 99, 235, 0.12);
+            --success: #059669;
+            --examples-accent: #7c3aed;
+            --error: #dc2626;
+            --radius: 10px;
+            --sidebar-w: 280px;
+            --bottom-h: 320px; /* Changed to px for clarity */
+            --header-h: 52px; /* Added for consistent header height */
+            --resize-h: 6px; /* Height of the resize handle */
+            --center-col-h: calc(100vh - var(--header-h) - var(--bottom-h) - var(--resize-h)); /* Dynamic height for center-col */
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* 浅色系滚动条 */
+        .sidebar-left .history-list,
+        .sidebar-left .examples-list,
+        .chat-pane,
+        .detail-panel .tab-content {
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 var(--border);
+        }
+        .sidebar-left .history-list::-webkit-scrollbar,
+        .sidebar-left .examples-list::-webkit-scrollbar,
+        .chat-pane::-webkit-scrollbar,
+        .detail-panel .tab-content::-webkit-scrollbar { width: 8px; height: 8px; }
+        .sidebar-left .history-list::-webkit-scrollbar-track,
+        .sidebar-left .examples-list::-webkit-scrollbar-track,
+        .chat-pane::-webkit-scrollbar-track,
+        .detail-panel .tab-content::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-left .history-list::-webkit-scrollbar-thumb,
+        .sidebar-left .examples-list::-webkit-scrollbar-thumb,
+        .chat-pane::-webkit-scrollbar-thumb,
+        .detail-panel .tab-content::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .sidebar-left .history-list::-webkit-scrollbar-thumb:hover,
+        .sidebar-left .examples-list::-webkit-scrollbar-thumb:hover,
+        .chat-pane::-webkit-scrollbar-thumb:hover,
+        .detail-panel .tab-content::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        body {
+            font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Main body scroll handled by flex items */
+        }
+
+        .app-header {
+            flex-shrink: 0;
+            background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 50%, #f5f3ff 100%);
+            border-bottom: 2px solid var(--accent);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: var(--header-h);
+            z-index: 10;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+        }
+        .app-header::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, var(--accent) 0%, var(--examples-accent) 100%);
+            border-radius: 0 2px 2px 0;
+        }
+        .app-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e40af;
+            margin-left: 4px;
+            letter-spacing: -0.02em;
+        }
+        .app-header .badge {
+            background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+            color: #fff;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+        }
+
+        .main-row {
+            flex: 1; /* Takes up all remaining vertical space */
+            min-height: 0; /* Allows it to shrink if needed by its children */
+            display: flex;
+            overflow: hidden; /* Prevent main-row from scrolling */
+        }
+
+        .sidebar-left {
+            width: var(--sidebar-w);
+            flex-shrink: 0;
+            background: var(--bg-dark);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding: 10px;
+            gap: 12px;
+        }
+        .sidebar-left .sidebar-block {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .sidebar-left .sidebar-block-history {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+        }
+        .sidebar-left .sidebar-block-history .section-title {
+            background: rgba(37, 99, 235, 0.08);
+            color: var(--accent);
+            border-bottom: 1px solid var(--border);
+            padding: 10px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .sidebar-left .sidebar-block-examples {
+            background: rgba(124, 58, 237, 0.06);
+            border: 1px solid rgba(124, 58, 237, 0.2);
+        }
+        .sidebar-left .sidebar-block-examples .section-title {
+            background: rgba(124, 58, 237, 0.08);
+            color: var(--examples-accent);
+            border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+            padding: 10px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .sidebar-left .section-title {
+            flex-shrink: 0;
+        }
+        .history-list, .examples-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 8px 10px;
+        }
+        .sidebar-left .sidebar-block-history .history-item,
+        .sidebar-left .sidebar-block-examples .example-item {
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 13px;
+            line-height: 1.4;
+            transition: all 0.15s ease;
+        }
+        .sidebar-left .sidebar-block-history .history-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+        .sidebar-left .sidebar-block-history .history-item:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .sidebar-left .sidebar-block-history .history-item-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .sidebar-left .sidebar-block-history .history-item-delete {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border: none;
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.15s, background 0.15s;
+        }
+        .sidebar-left .sidebar-block-history .history-item-delete:hover {
+            color: var(--error);
+            background: rgba(220, 38, 38, 0.1);
+        }
+        .sidebar-left .sidebar-block-examples .example-item {
+            background: rgba(124, 58, 237, 0.05);
+            border: 1px solid rgba(124, 58, 237, 0.15);
+            color: var(--text-muted);
+        }
+        .sidebar-left .sidebar-block-examples .example-item:hover {
+            border-color: var(--examples-accent);
+            color: var(--text);
+            background: rgba(124, 58, 237, 0.08);
+        }
+        .history-item .time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .center-col {
+            flex: 1; /* Takes up all remaining horizontal space */
+            /* Crucial: Set a calculated height for center-col */
+            height: var(--center-col-h); 
+            min-height: var(--chat-min-h, 120px); /* Ensure minimum chat pane height */
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .chat-pane {
+            flex: 1; /* Occupies all available space in center-col */
+            /* min-height is now handled by center-col's min-height */
+            overflow-y: auto; /* THIS IS THE KEY for scrolling */
+            overflow-x: hidden;
+            padding: 16px 20px;
+        }
+
+        .chat-messages {
+            /* min-height: 100%; removed this. Let content dictate height. */
+        }
+
+        .resize-handle {
+            position: fixed; /* Fixed position relative to viewport */
+            left: var(--sidebar-w);
+            right: 0;
+            bottom: var(--bottom-h); /* Position it right above center-bottom */
+            height: var(--resize-h);
+            background: var(--border);
+            cursor: ns-resize;
+            z-index: 100; /* Ensure it's on top of everything */
+        }
+        .resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+        .resize-handle::after {
+            content: '';
+            display: block;
+            position: relative;
+            top: 2px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 2px;
+            background: var(--text-muted);
+            border-radius: 1px;
+        }
+
+        /* Pipeline 底边永远贴屏幕底部：fixed + bottom:0，只改 height */
+        .center-bottom {
+            position: fixed;
+            left: var(--sidebar-w);
+            right: 0;
+            bottom: 0;
+            width: auto;
+            height: var(--bottom-h);
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Hide scrollbars within center-bottom */
+            background: var(--bg-dark);
+            z-index: 5; /* Below resize handle, above chat pane content */
+        }
+        .message {
+            margin-bottom: 16px;
+            animation: fadeIn 0.25s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message.user { display: flex; justify-content: flex-end; }
+        .message.user .bubble {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            color: var(--text);
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border-bottom-right-radius: 4px;
+        }
+        .message.assistant { display: flex; flex-direction: column; align-items: stretch; }
+        .message.assistant .bubble {
+            position: relative;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 18px 24px;
+            border-radius: 12px;
+            border-bottom-left-radius: 4px;
+            line-height: 1.65;
+        }
+        .message.assistant .bubble-copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            left: auto;
+            padding: 4px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-panel);
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
+        }
+        .message.assistant .bubble-copy-btn:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+        .message.assistant .bubble-copy-btn.copied {
+            color: var(--success);
+            border-color: var(--success);
+        }
+        .message.assistant .bubble > p:first-child { margin-top: 0; }
+        .message.assistant .bubble > p:last-child { margin-bottom: 0; }
+        .message.assistant .bubble p {
+            margin: 10px 0;
+        }
+        .message.assistant .bubble ul,
+        .message.assistant .bubble ol {
+            margin: 10px 0;
+            padding-left: 26px;
+        }
+        .message.assistant .bubble ul ul,
+        .message.assistant .bubble ol ul,
+        .message.assistant .bubble ul ol,
+        .message.assistant .bubble ol ol {
+            margin: 6px 0;
+            padding-left: 22px;
+        }
+        .message.assistant .bubble li {
+            margin-bottom: 6px;
+        }
+        .message.assistant .bubble li:last-child { margin-bottom: 0; }
+        .message.assistant .bubble blockquote {
+            margin: 12px 0;
+            padding: 8px 0 8px 16px;
+            border-left: 4px solid var(--accent);
+            color: var(--text-muted);
+        }
+        .message.assistant .bubble h1,.message.assistant .bubble h2,.message.assistant .bubble h3 {
+            color: var(--accent);
+            margin-top: 18px;
+            margin-bottom: 10px;
+        }
+        .message.assistant .bubble h1:first-child,.message.assistant .bubble h2:first-child,.message.assistant .bubble h3:first-child { margin-top: 0; }
+        .message.assistant .bubble code { background: rgba(37, 99, 235, 0.1); padding: 2px 6px; border-radius: 4px; font-size: 90%; color: var(--text); }
+        .message.assistant .bubble pre { background: #f1f5f9; padding: 12px 16px; border-radius: 8px; overflow-x: auto; margin: 12px 0; border: 1px solid var(--border); }
+        .message.assistant .bubble pre code { background: none; padding: 0; }
+        .message.assistant .bubble table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        .message.assistant .bubble th,.message.assistant .bubble td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; }
+        .message.assistant .bubble th { background: var(--bg-panel); font-weight: 600; }
+
+        /* Pipeline steps strip */
+        .pipeline-strip {
+            flex-shrink: 0;
+            background: #f1f5f9;
+            border-top: 1px solid var(--border);
+            padding: 10px 16px;
+            overflow-x: auto;
+        }
+        .pipeline-strip .title-row {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .pipeline-steps {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .step-node {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: #e2e8f0;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .step-node.running {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(37, 99, 235, 0.12);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+        .step-node.completed {
+            border-color: var(--success);
+            color: var(--success);
+            background: rgba(5, 150, 105, 0.1);
+        }
+        .step-node .icon {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.5;
+        }
+        .step-node.running .icon {
+            animation: pulse-dot 1s ease infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+            30% { transform: translateY(-1px); opacity: 1; }
+        }
+        .step-node.completed .icon {
+            background: var(--success);
+            opacity: 1;
+        }
+        .step-node.queue {
+            border-color: #d97706;
+            color: #d97706;
+            background: rgba(217, 119, 6, 0.1);
+        }
+        .step-node.queue .icon {
+            background: #d97706;
+            opacity: 1;
+            animation: pulse-dot 1s ease infinite;
+        }
+
+        /* Reasoning / Tool output panel */
+        .detail-panel {
+            flex: 1; /* Allow detail panel to fill available space within center-bottom */
+            background: #f8fafc;
+            border-top: 1px solid var(--border);
+            max-height: 100%;
+            overflow: hidden; /* Its children (tab-content) handle scrolling */
+            display: flex;
+            flex-direction: column;
+        }
+        .detail-panel .tabs {
+            flex-shrink: 0;
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            padding: 0 12px;
+        }
+        .detail-panel .tab {
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+        }
+        .detail-panel .tab:hover { color: var(--text); }
+        .detail-panel .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .detail-panel .tab-content {
+            flex: 1;
+            overflow-y: auto; /* Key: Make tab content scrollable */
+            padding: 12px 16px;
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            display: none;
+        }
+        .detail-panel .tab-content.active { display: block; }
+        .detail-panel .tab-content .phase-label {
+            color: var(--accent);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .detail-panel .stream-line {
+            margin-bottom: 4px;
+        }
+        .detail-panel .status-log-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            margin-bottom: 6px;
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius);
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .detail-panel .status-log-row .status-log-phase {
+            flex-shrink: 0;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .detail-panel .status-log-row .status-log-message {
+            flex: 1;
+            min-width: 0;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .detail-panel .status-log-row.queued {
+            border-left-color: #d97706;
+            background: rgba(217, 119, 6, 0.06);
+        }
+        .detail-panel .status-log-row.queued .status-log-phase,
+        .detail-panel .status-log-row.queued .status-log-message {
+            color: #d97706;
+            font-weight: 600;
+        }
+        .detail-panel .tool-response-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            margin-bottom: 6px;
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--examples-accent);
+            border-radius: var(--radius);
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .detail-panel .tool-response-row:hover {
+            border-color: var(--accent);
+            background: rgba(37, 99, 235, 0.06);
+        }
+        .detail-panel .tool-response-row .tool-response-copy-icon {
+            flex-shrink: 0;
+            margin-left: auto;
+            opacity: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            color: var(--text-muted);
+            transition: opacity 0.15s ease;
+        }
+        .detail-panel .tool-response-row:hover .tool-response-copy-icon {
+            opacity: 1;
+        }
+        .detail-panel .tool-response-row .tool-response-copy-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+        .detail-panel .tool-response-row .tool-name {
+            flex-shrink: 0;
+            color: var(--accent);
+            font-weight: 600;
+        }
+        .detail-panel .tool-response-row .tool-content {
+            flex: 1;
+            min-width: 0;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .detail-panel .tool-response-row.copied {
+            border-color: var(--success);
+            border-left-color: var(--success);
+            background: rgba(5, 150, 105, 0.12);
+        }
+
+        /* Input bar */
+        .input-bar {
+            flex-shrink: 0;
+            padding: 16px 20px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+        }
+        .input-bar .status-line {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            min-height: 18px;
+        }
+        .input-bar .status-line.running { color: var(--accent); }
+        .input-bar .status-line.queued { color: #d97706; font-weight: 600; }
+        .input-bar .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .input-bar textarea {
+            flex: 1;
+            min-height: 44px;
+            max-height: 120px;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 14px;
+            resize: none;
+        }
+        .input-bar textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        .input-bar textarea::placeholder { color: var(--text-muted); }
+        .input-bar .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .input-bar .btn-send {
+            background: var(--accent);
+            color: #ffffff;
+        }
+        .input-bar .btn-send:hover:not(:disabled) { filter: brightness(1.1); }
+        .input-bar .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .input-bar .btn-clear {
+            background: var(--bg-card);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+        .input-bar .btn-clear:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+        .input-bar .btn-clear:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .error-toast {
+            background: rgba(220, 38, 38, 0.08);
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            margin: 0 20px 12px;
+            font-size: 13px;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+            padding: 8px 0;
+        }
+        .typing-dots span {
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: typing 1.2s ease infinite;
+        }
+        .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+            30% { transform: translateY(-4px); opacity: 1; }
+        }
+        .bubble-thinking {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        .bubble-thinking .typing-dots {
+            padding: 0;
+        }
+
+        @media (max-width: 900px) {
+            .sidebar-left { width: 220px; min-width: 200px; }
+            :root { --sidebar-w: 220px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <h1>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</h1>
+        <span class="badge" id="modelBadge">Agent Dashboard</span>
+    </header>
+
+    <div class="main-row">
+        <aside class="sidebar-left">
+            <div class="sidebar-block sidebar-block-history">
+                <div class="section-title">Query History</div>
+                <div class="history-list" id="historyList"></div>
+            </div>
+            <div class="sidebar-block sidebar-block-examples">
+                <div class="section-title">Example Cases</div>
+                <div class="examples-list">
+                <div class="example-item" data-q="The patient presents with the following phenotypic abnormalities: HP:0000793, HP:0001974, HP:0002205, HP:0002633, HP:0003496, and HP:0100778. Please analyze these phenotypes and identify the most likely rare diseases that could explain this combination of features.">Case 1: Diagnosis from 6 HPO terms</div>
+                <div class="example-item" data-q="The patient presents with membranoproliferative glomerulonephritis, increased total leukocyte count, recurrent respiratory infections, vasculitis, increased circulating IgM level, and cryoglobulinemia. Please analyze and identify the most likely rare diseases.">Case 2: Diagnosis from clinical phenotype text</div>
+                <div class="example-item" data-q='"HP:0000421", "HP:0002105", "HP:0002113", "HP:0002829", "HP:0002907", "HP:0011227", "HP:0012213", "HP:0032230"'>Case 3: HPO ID list (8 terms)</div>
+                <div class="example-item" data-q="What are the main features of White-Kernohan syndrome?">Case 4: Query: White-Kernohan syndrome features</div>
+                <div class="example-item" data-q="What diseases are represented by ORPHA:397, OMIM:253800, and OMIM:153400?">Case 5: Look up diseases by ORPHA/OMIM IDs</div>
+                </div>
+            </div>
+        </aside>
+
+        <div class="center-col" id="centerCol"> <!-- Added ID here -->
+            <div class="chat-pane" id="chatPane">
+                <div class="chat-messages" id="chatContainer">
+                    <div class="message assistant">
+                        <div class="bubble welcome-bubble">
+                            <p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p>
+                            <p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p>
+                            <p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- The resize-handle is now fixed positioned -->
+        </div>
+        <!-- The resize-handle must be outside center-col for fixed positioning relative to viewport -->
+        <div class="resize-handle" id="resizeHandle" title="Drag to resize"></div>
+
+        <div class="center-bottom" id="centerBottom">
+            <div class="pipeline-strip" id="pipelineStrip">
+                <!-- <div class="title-row">Pipeline · Tool steps</div> -->
+                <div class="pipeline-steps" id="pipelineSteps"></div>
+            </div>
+            <div class="detail-panel" id="detailPanel">
+                <div class="tabs">
+                    <div class="tab active" data-tab="reasoning">Reasoning</div>
+                    <div class="tab" data-tab="tool_response">Tool Response</div>
+                    <div class="tab" data-tab="status">Status</div>
+                </div>
+                <div id="reasoningContent" class="tab-content active"></div>
+                <div id="toolResponseContent" class="tab-content"></div>
+                <div id="statusLogContent" class="tab-content"></div>
+            </div>
+            <div class="input-bar">
+                <div class="status-line" id="statusLine"></div>
+                <div class="input-row">
+                    <textarea id="userInput" placeholder="Enter query or paste phenotypes / HPO IDs..." rows="1"></textarea>
+                    <button type="button" class="btn btn-clear" id="clearBtn">Clear</button>
+                    <button class="btn btn-send" id="sendBtn"><span id="sendBtnText">Send</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const HISTORY_KEY = 'rdagent_input_history';
+            const CONVERSATION_KEY = 'rdagent_chat_conversation';
+            const HISTORY_MAX = 50;
+            const CHAT_MIN_PX = 120; // Minimum height for the chat pane
+            const BOTTOM_MIN_PX = 180; // Minimum height for the center-bottom pane
+            const DEFAULT_BOTTOM_RATIO = 0.4; // Initial ratio of screen height for bottom pane
+
+            function initMarkdown() {
+                if (typeof marked !== 'undefined') {
+                    marked.setOptions({ breaks: true, gfm: true, headerIds: false, mangle: false, sanitize: false });
+                }
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initMarkdown);
+            else initMarkdown();
+
+            // Fetch CSS variable values
+            function getCssVar(name) {
+                return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+            }
+
+            // Function to update all relevant height CSS variables
+            function updateLayoutHeights(newBottomHeight) {
+                const headerH = getCssVar('--header-h');
+                const resizeH = getCssVar('--resize-h');
+                const windowHeight = window.innerHeight;
+
+                // 1. Clamp newBottomHeight
+                const maxBottomHeight = windowHeight - headerH - resizeH - CHAT_MIN_PX;
+                const clampedBottomHeight = Math.max(BOTTOM_MIN_PX, Math.min(newBottomHeight, maxBottomHeight));
+                
+                // 2. Calculate center-col height based on clampedBottomHeight
+                const calculatedCenterColHeight = windowHeight - headerH - clampedBottomHeight - resizeH;
+
+                // 3. Apply CSS variables
+                document.documentElement.style.setProperty('--bottom-h', `${clampedBottomHeight}px`);
+                document.documentElement.style.setProperty('--center-col-h', `${calculatedCenterColHeight}px`);
+                
+                return clampedBottomHeight;
+            }
+
+            function initResize() {
+                const handle = document.getElementById('resizeHandle');
+                const centerCol = document.getElementById('centerCol'); // Get centerCol element
+                if (!handle || !centerCol) return;
+
+                // Initial setup
+                const headerH = getCssVar('--header-h');
+                const resizeH = getCssVar('--resize-h');
+                const usableHeight = window.innerHeight - headerH - resizeH;
+                
+                // Set initial height for the bottom panel based on ratio
+                updateLayoutHeights(DEFAULT_BOTTOM_RATIO * usableHeight);
+
+                let dragging = false;
+
+                function onMove(e) {
+                    if (!dragging) return;
+                    e.preventDefault(); // Prevent text selection while dragging
+                    
+                    // Calculate the new height for the bottom panel based on cursor position
+                    const newBottomHeight = window.innerHeight - e.clientY; 
+                    updateLayoutHeights(newBottomHeight);
+                }
+
+                function onUp() {
+                    dragging = false;
+                    handle.classList.remove('dragging');
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.body.style.cursor = ''; // Reset cursor
+                }
+
+                handle.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    dragging = true;
+                    handle.classList.add('dragging');
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                    document.body.style.cursor = 'ns-resize'; // Change cursor for entire body during drag
+                });
+
+                window.addEventListener('resize', function() {
+                    if (dragging) return; // Don't resize automatically if user is dragging
+                    
+                    // Recalculate available height and re-apply current bottom height (clamped)
+                    const currentBottomH = getCssVar('--bottom-h');
+                    if (!isNaN(currentBottomH)) {
+                         updateLayoutHeights(currentBottomH); // Re-apply existing height, clamped
+                    } else {
+                        const headerH = getCssVar('--header-h');
+                        const resizeH = getCssVar('--resize-h');
+                        const usableHeight = window.innerHeight - headerH - resizeH;
+                        updateLayoutHeights(DEFAULT_BOTTOM_RATIO * usableHeight);
+                    }
+                });
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initResize);
+            else initResize();
+
+            let sessionId = null;
+            let isProcessing = false;
+            const stepStates = {};
+            var queueShowTimer = null;  // 排队满 1 秒后才在 Pipeline 前显示 Queue 标签
+            var hasToolCallForPhase = { info_extraction: false, workflow: false };
+            const phaseOrder = ['classification', 'info_extraction', 'workflow', 'evaluation', 'synthesis'];
+            const phaseLabels = {
+                info_extraction: 'Info extraction',
+                workflow: 'Diagnosis flow',
+                classification: 'Task type',
+                evaluation: 'Evaluation',
+                synthesis: 'Report',
+                queue: 'Queue'
+            };
+
+            function getHistory() {
+                try {
+                    const raw = localStorage.getItem(HISTORY_KEY);
+                    return raw ? JSON.parse(raw) : [];
+                } catch (_) { return []; }
+            }
+            function saveHistory(entry) {
+                const list = getHistory();
+                list.unshift({ query: entry.query, time: entry.time || Date.now(), msgId: entry.msgId });
+                const trimmed = list.slice(0, HISTORY_MAX);
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+                renderHistory();
+            }
+            function setHistory(list) {
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+                renderHistory();
+            }
+            function renderHistory() {
+                const el = document.getElementById('historyList');
+                const list = getHistory();
+                el.innerHTML = list.length === 0
+                    ? '<div class="history-item" style="cursor:default;color:var(--text-muted)">No history yet</div>'
+                    : list.map(function (item, i) {
+                        const t = new Date(item.time);
+                        const timeStr = t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const short = item.query.length > 80 ? item.query.slice(0, 80) + '…' : item.query;
+                        const msgIdAttr = item.msgId ? ' data-msg-id="' + escapeAttr(item.msgId) + '"' : '';
+                        return '<div class="history-item" data-index="' + i + '" data-query="' + escapeAttr(item.query) + '"' + msgIdAttr + '><div class="history-item-content"><div>' + escapeHtml(short) + '</div><div class="time">' + timeStr + '</div></div><button type="button" class="history-item-delete" aria-label="Delete">×</button></div>';
+                    }).join('');
+            }
+            function escapeHtml(s) {
+                const d = document.createElement('div');
+                d.textContent = s;
+                return d.innerHTML;
+            }
+            function escapeAttr(s) {
+                return escapeHtml(s).replace(/"/g, '&quot;');
+            }
+
+            function initSession() {
+                if (!sessionId) sessionId = 'session_' + Date.now();
+            }
+
+            function updatePipelineStep(phase, statusText) {
+                if (phase === 'queue') {
+                    if (!queueShowTimer) {
+                        queueShowTimer = setTimeout(function () {
+                            queueShowTimer = null;
+                            stepStates['queue'] = 'running';
+                            renderPipeline();
+                        }, 1000);
+                    }
+                    return;
+                }
+                if (queueShowTimer) { clearTimeout(queueShowTimer); queueShowTimer = null; }
+                if (stepStates['queue'] !== undefined) {
+                    delete stepStates['queue'];
+                }
+                const isCompleted = typeof statusText === 'string' && (statusText.startsWith('[Completed]') || statusText.startsWith('[All done]'));
+                const isRunning = typeof statusText === 'string' && !isCompleted && statusText.length > 0;
+                if (phase) {
+                    if (isCompleted && (phase === 'info_extraction' || phase === 'workflow')) {
+                        stepStates[phase] = hasToolCallForPhase[phase] ? 'completed' : 'pending';
+                    } else {
+                        stepStates[phase] = isCompleted ? 'completed' : (isRunning ? 'running' : stepStates[phase] || 'pending');
+                    }
+                }
+                renderPipeline();
+            }
+            function renderPipeline() {
+                const container = document.getElementById('pipelineSteps');
+                var nodes = [];
+                if (stepStates['queue'] !== undefined) {
+                    nodes.push('<div class="step-node queue" data-phase="queue"><span class="icon"></span><span>' + escapeHtml(phaseLabels['queue'] || 'Queue') + '</span></div>');
+                }
+                phaseOrder.forEach(function (p) {
+                    const state = stepStates[p] || 'pending';
+                    const label = phaseLabels[p] || p;
+                    nodes.push('<div class="step-node ' + state + '" data-phase="' + p + '"><span class="icon"></span><span>' + escapeHtml(label) + '</span></div>');
+                });
+                container.innerHTML = nodes.join('');
+            }
+            function setStatusLine(text, isRunning, isQueued) {
+                const el = document.getElementById('statusLine');
+                el.textContent = text || '';
+                el.classList.toggle('running', !!isRunning);
+                el.classList.toggle('queued', !!isQueued);
+            }
+            function appendReasoningUI(phase, text) {
+                if (!text && text !== 0) return;
+                var s = String(text);
+                const el = document.getElementById('reasoningContent');
+                const phaseLabel = phaseLabels[phase] || phase;
+                var phaseKey = (phase || '').toLowerCase();
+                var candidates = el.querySelectorAll('.stream-line.stream-reasoning[data-phase]');
+                var lastBlock = null;
+                for (var i = candidates.length - 1; i >= 0; i--) {
+                    if ((candidates[i].getAttribute('data-phase') || '').toLowerCase() === phaseKey) {
+                        lastBlock = candidates[i];
+                        break;
+                    }
+                }
+                if (lastBlock) {
+                    var contentDiv = lastBlock.querySelector('.reasoning-text');
+                    if (contentDiv) {
+                        contentDiv.textContent += s;
+                        el.scrollTop = el.scrollHeight;
+                        return;
+                    }
+                }
+                var block = document.createElement('div');
+                block.className = 'stream-line stream-reasoning';
+                block.setAttribute('data-phase', phase || '');
+                var showPhaseLabel = (phase || '').toLowerCase() !== 'synthesis';
+                block.innerHTML = (showPhaseLabel ? '<div class="phase-label">' + escapeHtml(phaseLabel) + '</div>' : '') + '<div class="reasoning-text">' + escapeHtml(s) + '</div>';
+                el.appendChild(block);
+                el.scrollTop = el.scrollHeight;
+            }
+            function appendToolResponse(toolName, content) {
+                var el = document.getElementById('toolResponseContent');
+                var last = el.lastElementChild;
+                if (last && last.classList.contains('tool-response-row')) {
+                    var lastName = last.querySelector('.tool-name');
+                    var lastContent = last.querySelector('.tool-content');
+                    if (lastName && lastContent && lastName.textContent === (toolName || '') && lastContent.textContent === (content != null ? String(content) : ''))
+                        return;
+                }
+                var row = document.createElement('div');
+                row.className = 'tool-response-row';
+                row.title = 'Click to copy';
+                var nameSpan = document.createElement('span');
+                nameSpan.className = 'tool-name';
+                nameSpan.textContent = toolName || '';
+                var contentSpan = document.createElement('span');
+                contentSpan.className = 'tool-content';
+                contentSpan.textContent = content != null ? String(content) : '';
+                var copyIcon = document.createElement('span');
+                copyIcon.className = 'tool-response-copy-icon';
+                copyIcon.setAttribute('aria-hidden', 'true');
+                copyIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+                row.appendChild(nameSpan);
+                row.appendChild(contentSpan);
+                row.appendChild(copyIcon);
+                var fullText = (toolName || '') + '\t' + (content != null ? String(content) : '');
+                row.addEventListener('click', function () {
+                    function fallbackCopy(text) {
+                        var ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.left = '-9999px';
+                        ta.style.top = '0';
+                        document.body.appendChild(ta);
+                        ta.focus();
+                        ta.select();
+                        try {
+                            var ok = document.execCommand('copy');
+                            document.body.removeChild(ta);
+                            return ok;
+                        } catch (e) {
+                            document.body.removeChild(ta);
+                            return false;
+                        }
+                    }
+                    function doCopy() {
+                        if (navigator.clipboard && window.isSecureContext) {
+                            return navigator.clipboard.writeText(fullText).then(function () { return true; }).catch(function () { return fallbackCopy(fullText); });
+                        }
+                        return Promise.resolve(fallbackCopy(fullText));
+                    }
+                    doCopy().then(function (ok) {
+                        if (ok) {
+                            row.classList.add('copied');
+                            setTimeout(function () { row.classList.remove('copied'); }, 600);
+                        }
+                    });
+                });
+                el.appendChild(row);
+                el.scrollTop = el.scrollHeight;
+            }
+            function appendStatusLog(phase, payload) {
+                if (phase === 'queue') return;
+                const el = document.getElementById('statusLogContent');
+                const row = document.createElement('div');
+                row.className = 'status-log-row';
+                const phaseSpan = document.createElement('span');
+                phaseSpan.className = 'status-log-phase';
+                phaseSpan.textContent = (phaseLabels[phase] || phase || 'log');
+                const msgSpan = document.createElement('span');
+                msgSpan.className = 'status-log-message';
+                msgSpan.textContent = payload != null ? String(payload) : '';
+                row.appendChild(phaseSpan);
+                row.appendChild(msgSpan);
+                el.appendChild(row);
+                el.scrollTop = el.scrollHeight;
+            }
+            function clearDetailPanel() {
+                document.getElementById('reasoningContent').innerHTML = '';
+                document.getElementById('toolResponseContent').innerHTML = '';
+                document.getElementById('statusLogContent').innerHTML = '';
+            }
+            function resetPipelineStates() {
+                if (queueShowTimer) { clearTimeout(queueShowTimer); queueShowTimer = null; }
+                phaseOrder.forEach(function (p) { stepStates[p] = 'pending'; });
+                delete stepStates['queue'];
+                hasToolCallForPhase.info_extraction = false;
+                hasToolCallForPhase.workflow = false;
+                renderPipeline();
+            }
+
+            var tabToContentId = { reasoning: 'reasoningContent', tool_response: 'toolResponseContent', status: 'statusLogContent' };
+            document.querySelectorAll('.detail-panel .tab').forEach(function (tab) {
+                tab.addEventListener('click', function () {
+                    document.querySelectorAll('.detail-panel .tab').forEach(function (t) { t.classList.remove('active'); });
+                    document.querySelectorAll('.detail-panel .tab-content').forEach(function (c) { c.classList.remove('active'); });
+                    tab.classList.add('active');
+                    var key = tab.getAttribute('data-tab');
+                    var id = tabToContentId[key] || key + 'Content';
+                    var contentEl = document.getElementById(id);
+                    if (contentEl) contentEl.classList.add('active');
+                });
+            });
+
+            document.getElementById('chatContainer').addEventListener('click', function (e) {
+                var btn = e.target.closest('.bubble-copy-btn');
+                if (!btn) return;
+                var bubble = btn.closest('.bubble');
+                if (!bubble) return;
+                var clone = bubble.cloneNode(true);
+                var copyBtnInClone = clone.querySelector('.bubble-copy-btn');
+                if (copyBtnInClone) copyBtnInClone.remove();
+                var text = clone.innerText || clone.textContent || '';
+                if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                    try {
+                        var ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                    } catch (err) { return; }
+                } else {
+                    navigator.clipboard.writeText(text).catch(function () {});
+                }
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+            });
+
+            document.getElementById('historyList').addEventListener('click', function (e) {
+                const deleteBtn = e.target.closest('.history-item-delete');
+                if (deleteBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const item = deleteBtn.closest('.history-item');
+                    if (!item || item.dataset.index === undefined) return;
+                    const index = parseInt(item.dataset.index, 10);
+                    const msgId = item.dataset.msgId;
+                    if (msgId) {
+                        const userEl = document.getElementById(msgId);
+                        if (userEl) {
+                            const assistantEl = userEl.nextElementSibling;
+                            userEl.remove();
+                            if (assistantEl && assistantEl.classList.contains('message')) assistantEl.remove();
+                        }
+                    }
+                    const list = getHistory().filter(function (_, i) { return i !== index; });
+                    setHistory(list);
+                    saveConversation();
+                    return;
+                }
+                const item = e.target.closest('.history-item[data-msg-id]');
+                if (!item || !item.dataset.msgId) return;
+                const el = document.getElementById(item.dataset.msgId);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+
+            document.querySelectorAll('.example-item').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    var q = this.getAttribute('data-q');
+                    if (q) document.getElementById('userInput').value = q;
+                    document.getElementById('userInput').focus();
+                });
+            });
+
+            function addMessage(role, content, messageId) {
+                const chat = document.getElementById('chatContainer');
+                const wrap = document.createElement('div');
+                wrap.className = 'message ' + role;
+                if (messageId && role === 'user') wrap.id = messageId;
+                const bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                if (messageId && role === 'assistant') bubble.id = messageId;
+                var isWelcomeBubble = role === 'assistant' && content && (content.indexOf('This dashboard shows real-time pipeline steps') !== -1);
+                if (content) {
+                    bubble.dataset.rawContent = content;
+                    if (isWelcomeBubble) {
+                        bubble.classList.add('welcome-bubble');
+                        bubble.innerHTML = '<p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>';
+                    } else {
+                        bubble.innerHTML = formatMessage(content);
+                    }
+                } else {
+                    bubble.dataset.rawContent = '';
+                    if (role === 'assistant') {
+                        bubble.classList.add('bubble-pending');
+                        bubble.innerHTML = '<div class="bubble-thinking"><span class="typing-dots"><span></span><span></span><span></span></span><span class="bubble-thinking-text">Waiting...</span></div>';
+                    }
+                }
+                wrap.appendChild(bubble);
+                chat.appendChild(wrap);
+                var pane = document.getElementById('chatPane');
+                if (pane) pane.scrollTop = pane.scrollHeight;
+                return bubble;
+            }
+            function saveConversation() {
+                var chat = document.getElementById('chatContainer');
+                if (!chat) return;
+                var list = [];
+                for (var i = 0; i < chat.children.length; i++) {
+                    var el = chat.children[i];
+                    if (!el.classList.contains('message')) continue;
+                    var role = el.classList.contains('user') ? 'user' : 'assistant';
+                    var bubble = el.querySelector('.bubble');
+                    if (!bubble) continue;
+                    var content;
+                    if (role === 'assistant') {
+                        if (bubble.classList.contains('bubble-pending') || bubble.querySelector('.bubble-thinking')) {
+                            content = '';
+                        } else if (bubble.dataset.rawContent !== undefined && bubble.dataset.rawContent !== '') {
+                            content = bubble.dataset.rawContent;
+                        } else {
+                            var clone = bubble.cloneNode(true);
+                            var copyBtn = clone.querySelector('.bubble-copy-btn');
+                            if (copyBtn) copyBtn.remove();
+                            content = clone.innerText || clone.textContent || '';
+                        }
+                    } else {
+                        content = bubble.textContent;
+                    }
+                    var msgId = role === 'user' ? (el.id || '') : undefined;
+                    list.push({ role: role, content: content || '', msgId: msgId || undefined });
+                }
+                try { localStorage.setItem(CONVERSATION_KEY, JSON.stringify(list)); } catch (e) {}
+            }
+            function loadConversation() {
+                try {
+                    var raw = localStorage.getItem(CONVERSATION_KEY);
+                    if (!raw) return;
+                    var list = JSON.parse(raw);
+                    if (!list || list.length === 0) return;
+                    var chat = document.getElementById('chatContainer');
+                    if (!chat) return;
+                    chat.innerHTML = '';
+                    for (var i = 0; i < list.length; i++) {
+                        var item = list[i];
+                        var bubble = addMessage(item.role, item.content, item.msgId);
+                        if (item.role === 'assistant') addCopyButtonToBubble(bubble);
+                    }
+                    var pane = document.getElementById('chatPane');
+                    if (pane) pane.scrollTop = pane.scrollHeight;
+                } catch (e) {}
+            }
+            function appendToMessage(container, content) {
+                if (!container) return;
+                container.classList.remove('bubble-pending');
+                var raw = (container.dataset.rawContent || '') + content;
+                container.dataset.rawContent = raw;
+                container.innerHTML = formatMessage(raw);
+                var pane = document.getElementById('chatPane');
+                if (pane) pane.scrollTop = pane.scrollHeight; // Ensure scroll to bottom on append
+            }
+            function setBubbleThinking(bubble, text) {
+                if (!bubble || !bubble.querySelector('.bubble-thinking')) return;
+                var el = bubble.querySelector('.bubble-thinking-text');
+                if (el) el.textContent = text;
+            }
+            function addCopyButtonToBubble(bubble) {
+                if (!bubble || bubble.classList.contains('welcome-bubble')) return;
+                if (bubble.querySelector('.bubble-copy-btn')) return;
+                var copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.className = 'bubble-copy-btn';
+                copyBtn.textContent = 'Copy';
+                copyBtn.title = 'Copy reply';
+                bubble.insertBefore(copyBtn, bubble.firstChild);
+            }
+            function formatMessage(text) {
+                if (!text) return '';
+                if (typeof marked !== 'undefined') {
+                    try {
+                        var html = marked.parse(text);
+                        if (typeof hljs !== 'undefined') {
+                            requestAnimationFrame(function () {
+                                var c = document.getElementById('chatContainer');
+                                if (c) c.querySelectorAll('pre code').forEach(function (block) {
+                                    if (!block.classList.contains('hljs')) hljs.highlightElement(block);
+                                });
+                            });
+                        }
+                        return html;
+                    } catch (e) { return escapeHtml(text); }
+                }
+                return escapeHtml(text).replace(/\n/g, '<br>');
+            }
+
+            function showError(msg) {
+                const chat = document.getElementById('chatContainer');
+                const div = document.createElement('div');
+                div.className = 'error-toast';
+                div.textContent = 'Error: ' + msg;
+                chat.appendChild(div);
+                var pane = document.getElementById('chatPane');
+                if (pane) pane.scrollTop = pane.scrollHeight; // Ensure scroll to bottom on error
+            }
+            function resetUI() {
+                isProcessing = false;
+                document.getElementById('userInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                var clearBtn = document.getElementById('clearBtn');
+                if (clearBtn) clearBtn.disabled = false;
+                document.getElementById('sendBtnText').textContent = 'Send';
+                document.getElementById('userInput').focus();
+            }
+
+            async function sendMessage() {
+                var input = document.getElementById('userInput');
+                var query = input.value.trim();
+                if (!query || isProcessing) return;
+
+                isProcessing = true;
+                input.disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                var clearBtn = document.getElementById('clearBtn');
+                if (clearBtn) clearBtn.disabled = true;
+                document.getElementById('sendBtnText').innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
+
+                var userMsgId = 'hist_' + Date.now();
+                addMessage('user', query, userMsgId);
+                input.value = '';
+                saveHistory({ query: query, time: Date.now(), msgId: userMsgId });
+                saveConversation();
+
+                initSession();
+                resetPipelineStates();
+                clearDetailPanel();
+                setStatusLine('Connecting...', true);
+
+                var assistantBubbleId = 'msg_' + Date.now();
+                addMessage('assistant', '', assistantBubbleId);
+                var assistantBubble = document.getElementById(assistantBubbleId);
+
+                try {
+                    var response = await fetch('/api/chat/stream_dashboard', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: query, session_id: sessionId })
+                    });
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+
+                    var reader = response.body.getReader();
+                    var decoder = new TextDecoder();
+                    var buffer = '';
+
+                    while (true) {
+                        var { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        var lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (var i = 0; i < lines.length; i++) {
+                            var line = lines[i];
+                            if (!line.startsWith('data: ')) continue;
+                            try {
+                                var data = JSON.parse(line.slice(6));
+                                var type = data.type;
+                                var payload = data.data;
+                                var phase = data.phase || '';
+
+                                if (type === 'status') {
+                                    setStatusLine(payload, true, phase === 'queue');
+                                    updatePipelineStep(phase, payload);
+                                    appendStatusLog(phase, payload);
+                                    if (phase === 'queue') setBubbleThinking(assistantBubble, 'Waiting...');
+                                    else setBubbleThinking(assistantBubble, 'Thinking...');
+                                } else if (type === 'step') {
+                                    var st = data.status || 'running';
+                                    var p = data.phase;
+                                    if (p) {
+                                        if (st === 'completed' && (p === 'info_extraction' || p === 'workflow'))
+                                            stepStates[p] = hasToolCallForPhase[p] ? 'completed' : 'pending';
+                                        else
+                                            stepStates[p] = st === 'completed' ? 'completed' : (st === 'running' ? 'running' : (stepStates[p] || 'pending'));
+                                    }
+                                    renderPipeline();
+                                } else if (type === 'content') {
+                                    appendToMessage(assistantBubble, payload);
+                                } else if (type === 'reasoning') {
+                                    appendReasoningUI(phase, payload);
+                                } else if (type === 'tool_response') {
+                                    var name = data.tool_name != null ? data.tool_name : '';
+                                    var text = data.data != null ? data.data : (payload != null ? payload : '');
+                                    if (!name && text) {
+                                        if (text.indexOf('[Info extraction]') === 0) { name = 'info_extraction'; text = text.replace(/^\s*\[Info extraction\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || '[Completed] Information extraction'; }
+                                        else if (text.indexOf('[Workflow]') === 0) { name = 'workflow'; text = text.replace(/^\s*\[Workflow\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || text; }
+                                        else name = 'tool';
+                                    }
+                                    if (!name) name = 'tool';
+                                    if (name === 'disease_diagnosis_tool') {
+                                        hasToolCallForPhase.workflow = true;
+                                        stepStates['workflow'] = 'completed';
+                                        renderPipeline();
+                                    } else if (name) hasToolCallForPhase.info_extraction = true;
+                                    appendToolResponse(name, text);
+                                } else if (type === 'error') {
+                                    if (assistantBubble) {
+                                        assistantBubble.classList.remove('bubble-pending');
+                                        assistantBubble.dataset.rawContent = '';
+                                        assistantBubble.innerHTML = '<p style="color:var(--error)">Request failed. Please try again.</p>';
+                                    }
+                                    showError(payload);
+                                    saveConversation();
+                                    resetUI();
+                                    return;
+                                } else if (type === 'done') {
+                                    addCopyButtonToBubble(assistantBubble);
+                                    setStatusLine('', false);
+                                    saveConversation();
+                                    resetUI();
+                                    return;
+                                }
+                            } catch (e) { console.warn('Parse stream:', e); }
+                        }
+                    }
+                    addCopyButtonToBubble(assistantBubble);
+                    setStatusLine('', false);
+                } catch (err) {
+                    showError(err.message);
+                    saveConversation();
+                }
+                resetUI();
+            }
+
+            document.getElementById('sendBtn').addEventListener('click', sendMessage);
+            document.getElementById('userInput').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+            });
+            document.getElementById('clearBtn').addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isProcessing) return;
+                var chat = document.getElementById('chatContainer');
+                if (chat) {
+                    chat.innerHTML = '<div class="message assistant"><div class="bubble welcome-bubble"><p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p></div></div>';
+                    saveConversation();
+                }
+                sessionId = null;
+                setHistory([]);
+                resetPipelineStates();
+                clearDetailPanel();
+                setStatusLine('', false);
+            });
+
+            renderHistory();
+            renderPipeline();
+            loadConversation();
+
+            (function loadModelBadge() {
+                var el = document.getElementById('modelBadge');
+                if (!el) return;
+                fetch('/api/config').then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+                    if (data && data.model) el.textContent = data.model;
+                }).catch(function () {});
+            })();
+        })();
+    </script>
+</body>
+</html>

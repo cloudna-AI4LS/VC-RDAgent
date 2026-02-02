@@ -2,15 +2,18 @@
 
 ## Overview
 
-This is a web-based phenotype-to-disease diagnosis system with a graphical user interface and real-time streaming of diagnosis results.
+This is a web-based phenotype-to-disease diagnosis system with a graphical user interface and real-time streaming of diagnosis results. The recommended entry is:
+
+- **RDAgent Dashboard** — Professional agent UI with pipeline steps and reasoning, served by `rdagent_dashboard_api.py`
 
 ## Features
 
 - 🎨 **Modern UI**: Gradient layout and responsive design
 - 🔄 **Real-time streaming**: Server-Sent Events (SSE) streaming
 - 💬 **Chat history**: Session history and multi-turn conversation
-- 📊 **Status indicators**: Live progress and stage information
+- 📊 **Status indicators**: Live progress and pipeline stage information
 - 🧠 **Token management**: Automatic history length handling to stay within limits
+- 📋 **Dashboard**: Step-by-step pipeline display and reasoning view
 
 ## Dependencies
 
@@ -21,37 +24,27 @@ pip install fastapi uvicorn[standard]
 
 ## Starting the Service
 
-### Option 1: Startup script
+### RDAgent Dashboard (recommended)
+
+Default port: `8080` (override with env: `PORT=8082`).
 
 ```bash
-./start_web_ui.sh
+# Startup script
+./start_dashboard.sh
+
+# Or run directly
+python3 rdagent_dashboard_api.py
 ```
 
-### Option 2: Run Python directly
-
-```bash
-# Chinese UI
-python3 web_ui_api.py
-
-# English UI
-python3 web_ui_api_en.py
-```
-
-### Option 3: Uvicorn command
-
-```bash
-uvicorn web_ui_api:app --host 0.0.0.0 --port 8080 --reload
-```
+Access: **http://localhost:8080/rdagent/** (or the port you set).
 
 ## Accessing the UI
 
-After starting the service locally, open in your browser:
+| Service            | URL                             |
+|--------------------|---------------------------------|
+| RDAgent Dashboard  | http://localhost:8080/rdagent/  |
 
-```
-http://localhost:8080
-```
-
-From another machine on the same network, replace `localhost` with the host machine’s IP.
+From another machine on the same network, replace `localhost` with the host IP.
 
 ## Usage
 
@@ -67,46 +60,16 @@ From another machine on the same network, replace `localhost` with the host mach
 - `Diagnose possible diseases`
 - `What disease might this phenotype combination indicate?`
 
-## API Endpoints
+## API Endpoints (RDAgent Dashboard)
 
-### POST /api/chat/stream
-Streaming chat API; returns Server-Sent Events.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | / | Redirect to /rdagent/ |
+| GET | /rdagent, /rdagent/ | Serve `rdagent_dashboard.html` |
+| GET | /api/config | Current model name (for dashboard badge) |
+| POST | /api/chat/stream_dashboard | Streaming chat (SSE) |
 
-**Request body:**
-```json
-{
-    "query": "Patient symptom description",
-    "session_id": "Optional session ID"
-}
-```
-
-**Response:** Server-Sent Events stream
-
-### POST /api/chat
-Non-streaming chat API (for compatibility).
-
-**Request body:**
-```json
-{
-    "query": "Patient symptom description",
-    "session_id": "Optional session ID"
-}
-```
-
-**Response:**
-```json
-{
-    "session_id": "session_xxx",
-    "response": "Full response text",
-    "status": "success"
-}
-```
-
-### DELETE /api/session/{session_id}
-Clear the specified session.
-
-### GET /api/sessions
-List all sessions.
+Static assets are mounted under `/rdagent/` (e.g. `rdagent_dashboard.html`, CSS, JS).
 
 ## Architecture
 
@@ -116,15 +79,15 @@ List all sessions.
 └──────┬──────┘
        │ HTTP/SSE
        ▼
-┌─────────────┐
-│  FastAPI Server  │
-│  (web_ui_api.py) │
-└──────┬──────┘
+┌─────────────────────────────────────┐
+│  rdagent_dashboard_api.py           │  ← RDAgent Dashboard (FastAPI)
+└──────┬──────────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────────┐
 │  Controller Pipeline                 │
-│  (phenotype_to_disease_controller)   │
+│  (phenotype_to_disease_controller_   │
+│   langchain_stream_api)              │
 │  - InfoExtractionAgent               │
 │  - WorkflowAgent                     │
 │  - Synthesizer                       │
@@ -136,12 +99,10 @@ List all sessions.
 
 ```
 chat-system/
-├── web_ui_api.py              # FastAPI backend (Chinese)
-├── web_ui_api_en.py           # FastAPI backend (English)
+├── rdagent_dashboard_api.py   # RDAgent Dashboard backend
 ├── rdagent/
-│   ├── index.html             # Chinese frontend
-│   └── index_en.html          # English frontend
-├── start_web_ui.sh            # Startup script
+│   └── rdagent_dashboard.html # RDAgent Dashboard frontend
+├── start_dashboard.sh         # Start Dashboard
 ├── WEB_UI_README.md           # This document
 ├── README.md                  # Directory overview
 └── phenotype_to_disease_controller_langchain_stream_api.py   # Core controller
@@ -151,15 +112,15 @@ chat-system/
 
 ### Port
 
-Default port is `8080`. Change it at the end of `web_ui_api.py`:
-
-```python
-uvicorn.run(app, host="0.0.0.0", port=8080)
-```
+Default port `8080`. Override with env: `PORT=8082 ./start_dashboard.sh` or change at the end of `rdagent_dashboard_api.py`.
 
 ### CORS
 
-The default allows all origins. For production, restrict `allow_origins` to your domain (e.g. `http://localhost:8080`).
+Default allows all origins. For production, restrict `allow_origins` to your domain (e.g. `http://localhost:8080`).
+
+### Task queue
+
+Dashboard limits concurrent pipeline runs via `TASK_QUEUE_SIZE` (default `1`). Set in environment if needed: `TASK_QUEUE_SIZE=2 ./start_dashboard.sh`.
 
 ## Troubleshooting
 
@@ -177,7 +138,7 @@ netstat -tulpn | grep 8080
 
 ### 2. Static files not found
 
-Ensure `rdagent/index.html` exists and the path is correct.
+Ensure `rdagent/rdagent_dashboard.html` exists and the path is correct.
 
 ### 3. Missing dependencies
 
@@ -189,19 +150,19 @@ pip install fastapi uvicorn[standard] langchain langgraph
 
 ## Development
 
-### Editing the frontend
+### Frontend
 
-Edit `rdagent/index.html` (Chinese) or `rdagent/index_en.html` (English). Reload the browser to see changes (with `--reload` enabled).
+Edit `rdagent/rdagent_dashboard.html`; reload the browser to see changes (use uvicorn with `--reload` for auto-reload).
 
-### Editing the backend
+### Backend
 
-Edit `web_ui_api.py` and restart the service.
+Edit `rdagent_dashboard_api.py` and restart the service.
 
 ### Adding features
 
-1. Add new stages in the `controller_pipeline_stream` function
-2. Use `yield` to send status updates and content
-3. Handle new message types in the frontend (`index.html`)
+1. Add new stages in the controller stream API.
+2. Use `yield` to send status and content.
+3. Handle new message types in `rdagent_dashboard.html`.
 
 ## License
 

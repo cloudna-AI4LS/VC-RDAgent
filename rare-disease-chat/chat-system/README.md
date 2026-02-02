@@ -6,17 +6,17 @@ For **installing dependencies** (venv, `uv pip install -e .`), see the project r
 
 ---
 
-## Option 1: Web UI
+## Option 1: Web UI (RDAgent Dashboard)
 
-Interact with the system through a web page in your browser.
+Interact with the system through the RDAgent Dashboard in your browser.
 
 1. **Start the MCP server first** (see "Starting the Server" in the project root [README.md](../README.md)).
 2. In this directory, run:
    ```bash
-   ./start_web_ui.sh
+   ./start_dashboard.sh
    ```
-   Or: `python3 web_ui_api.py` (Chinese), `python3 web_ui_api_en.py` (English).
-3. Open in your browser: **http://localhost:8080**
+   Or: `python3 rdagent_dashboard_api.py`
+3. Open in your browser: **http://localhost:8080/rdagent/**
 
 See [WEB_UI_README.md](./WEB_UI_README.md) for details.
 

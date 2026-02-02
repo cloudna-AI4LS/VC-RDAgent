@@ -29,3 +29,8 @@ env/
 .DS_Store
 Thumbs.db
 model_weight
+
+# Deprecated files
+rare-disease-chat/chat-system/rdagent/index.html
+rare-disease-chat/chat-system/rdagent/index_en.html
+rare-disease-chat/chat-system/start_web_ui.sh

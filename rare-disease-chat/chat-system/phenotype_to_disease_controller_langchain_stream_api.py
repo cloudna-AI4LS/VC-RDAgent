@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Autonomous Multi-Agent System with LangGraph
-自主多智能体系统：工具Agent → 综合结果 → 评估响应质量
 
 Architecture:
 1. 🤖 Info Extraction Agent: Autonomous agent using LangGraph for tool orchestration
@@ -1236,7 +1235,8 @@ class WorkflowAgent:
         self.tool_results = tool_results or {}
         self.user_query = user_query
         self.status_callback = status_callback  # 存储回调函数
-        print(f"📊 Available tool results: {list(self.tool_results.keys())}")
+        # 来自上一阶段（Info Extraction Agent）的工具结果，执行 disease_diagnosis_tool 时会注入
+        print(f"📊 Tool results from previous phase (for injection): {list(self.tool_results.keys())}")
         
         # Get model with tools
         model = await get_model("workflow_agent")
@@ -1679,7 +1679,7 @@ async def controller_pipeline(user_query: str, conversation_messages: List[BaseM
         if task_type == "disease_diagnosis" and workflow_info.get("workflow") is None:
             enhanced_query = f"""{user_query}
 
-**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_diagnosis_tool to perform the diagnosis analysis.**"""
+**IMPORTANT: This query requires disease diagnosis. You MUST call the disease_case_extractor_tool to obtain disease cases, and MUST call the disease_diagnosis_tool to perform the diagnosis analysis.**"""
             return await controller_pipeline(enhanced_query, conversation_messages)
 
         # Phase 4: Evaluation (only for disease_diagnosis; use workflow result as final_response for eval)
