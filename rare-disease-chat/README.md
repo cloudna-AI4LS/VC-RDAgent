@@ -52,34 +52,16 @@ cd $PROJECT_ROOT
 
 ## Quick Start
 
-The fastest way to try the system is to run the MCP server and Web UI locally using the provided start scripts (after you have run `./set_config.sh` once; see **Configuration**).
-
-### 1. Start the MCP server
+One-click start (MCP server in background + Web UI in foreground). Run once **Configuration** and **Installation** first.
 
 ```bash
-cd $PROJECT_ROOT/mcp-server
-./start_server.sh
+cd rare-disease-chat
+./auto_start.sh
 ```
 
-The MCP server listens on `http://localhost:3000/mcp/` by default.
+Then open http://localhost:8080/rdagent/ in your browser. Press Ctrl+C to stop the dashboard (MCP server keeps running; stop with `mcp-server/stop_server.sh`).
 
-### 2. Start the chat (choose one)
-
-**Web UI (recommended):**
-```bash
-cd $PROJECT_ROOT/chat-system
-./start_dashboard.sh
-```
-Then open http://localhost:8080/rdagent/ in your browser.
-
-**CLI (terminal chat):**
-```bash
-cd $PROJECT_ROOT/chat-system
-python phenotype_to_disease_controller_langchain_stream_api.py
-```
-Type `quit` to exit, `clear` to clear chat history.
-
-For configuration details and Docker, see **More information** below.
+For separate steps (start_server.sh / start_dashboard.sh), CLI mode, and Docker, see **More information** below.
 
 ---
 
