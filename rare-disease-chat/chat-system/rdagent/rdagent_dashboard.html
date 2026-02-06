@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</title>
+    <title>VC-RDAgent: Rare Disease Intelligent Diagnosis System</title>
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -699,7 +699,7 @@
 </head>
 <body>
     <header class="app-header">
-        <h1>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</h1>
+        <h1>VC-RDAgent: Rare Disease Intelligent Diagnosis System</h1>
         <span class="badge" id="modelBadge">Agent Dashboard</span>
     </header>
 
@@ -726,8 +726,8 @@
                 <div class="chat-messages" id="chatContainer">
                     <div class="message assistant">
                         <div class="bubble welcome-bubble">
-                            <p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p>
-                            <p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p>
+                            <p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p>
+                            <p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p>
                             <p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>
                         </div>
                     </div>
@@ -1181,7 +1181,7 @@
                     bubble.dataset.rawContent = content;
                     if (isWelcomeBubble) {
                         bubble.classList.add('welcome-bubble');
-                        bubble.innerHTML = '<p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>';
+                        bubble.innerHTML = '<p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>';
                     } else {
                         bubble.innerHTML = formatMessage(content);
                     }
@@ -1437,7 +1437,7 @@
                 if (isProcessing) return;
                 var chat = document.getElementById('chatContainer');
                 if (chat) {
-                    chat.innerHTML = '<div class="message assistant"><div class="bubble welcome-bubble"><p><strong>VCAP-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented prompting framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p></div></div>';
+                    chat.innerHTML = '<div class="message assistant"><div class="bubble welcome-bubble"><p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p></div></div>';
                     saveConversation();
                 }
                 sessionId = null;

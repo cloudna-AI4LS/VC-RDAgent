@@ -1,26 +1,100 @@
-# VCAP-RDAgent
+# VC-RDAgent
 
-A Virtual Case Augmented Prompting (VCAP) framework for robust and privacy-preserving rare disease diagnosis. Rare disease diagnosis is hindered by phenotypic heterogeneity and data sparsity; LLM-based support that retrieves real patient records often faces sparse, inconsistent, or privacy-sensitive data. VCAP synthesizes *virtual standardized cases* from knowledge bases (HPO, Orphanet, OMIM, MONDO) instead of real clinical records, enabling privacy-conscious, evidence-grounded diagnostic reasoning.
+A Virtual Case (VC) augmented reasoning framework for robust and privacy-preserving rare disease diagnosis. VC synthesizes *virtual standardized cases* from knowledge bases (HPO, Orphanet, OMIM, MONDO) instead of real clinical records, enabling privacy-conscious, evidence-grounded diagnostic reasoning.
 
-**Project layout:**
-- `pho2disease/` — Core pipeline: prompt generation, ensemble ranking, phenotype→disease prediction
-- `rare-disease-chat/` — Interactive chat & MCP server (Web UI, terminal CLI, Docker)
+**Features**
 
----
-
-## Features
-
-- **Interactive Chat & MCP Server** — [rare-disease-chat](rare-disease-chat/) subproject: MCP (Model Context Protocol) server for phenotype/disease tools, Web UI, and terminal chat; supports Docker and local install
-- **Multi-step prompt generation** — 2/3-step chain-of-thought prompts with overlap, embedding, or hybrid case extraction
+- **Interactive Chat & MCP Server** — [rare-disease-chat](rare-disease-chat/): phenotype extraction, disease diagnosis, disease info retrieval as MCP tools; LangGraph multi-agent chat (terminal & Web UI); Docker or local install.
+- **Multi-step prompt generation** — 2/3-step chain-of-thought prompts with overlap, embedding, or hybrid case extraction.
 - **Ensemble disease ranking** — Fuses IC-weighted similarity, annotation-frequency–weighted similarity, and embedding-based similar-case ranking via Z-statistics.
-- **LLM evaluation** — Phenotype-to-disease prediction via local models (e.g. Qwen) or cloud APIs, with Top‑K and similarity metrics
-- **Standard biomedical ontologies** — HPO, Orphanet, MONDO, and custom disease–phenotype knowledge graphs
+- **LLM evaluation** — Phenotype-to-disease prediction via local models (e.g. Qwen) or cloud APIs, with Top‑K and similarity metrics.
+- **Standard biomedical ontologies** — HPO, Orphanet, MONDO, and custom disease–phenotype knowledge graphs.
 
 ---
 
-## Data Sources
+## Installation
 
-### 1. Evaluation / input data (`data/`)
+**Requirements:** Python 3.12.
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install -r requirements.txt
+source .venv/bin/activate
+```
+
+---
+
+## Configuration
+
+Set the following parameters in each config file before running.
+
+### `pho2disease/prompt_config.json`
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `base_path` | **Yes** | Project root (e.g. `/path/to/VC-RDAgent`). All other paths use `{base_path}/...`. |
+| `input_file` | Optional | Evaluation input JSON; default `{base_path}/data/PUMCH-ADM.json`. Change if using another dataset. |
+| `gpu_id` | Optional | GPU device ID for local models / embedding; default `2`. |
+
+Other paths (`phenotype_hpoa`, `obo_file`, `case_library`, `embedding_file`, `ic_file`, Orphanet/MONDO paths, etc.) are derived from `base_path`; override only if your layout differs.
+
+### `pho2disease/inference_config.json`
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `base_paths.base_path` | **Yes** | Project root (same as above). |
+| `openrouter_config.api_key` | **Yes** if using OpenRouter | Your OpenRouter API key; leave empty only for local models. |
+| `openrouter_config.model_name` | Optional | OpenRouter model (e.g. `qwen/qwen3-8b:free`). |
+| `model_config.default_model_name` | Optional | `"openrouter"` or local model name (e.g. `"Qwen/Qwen3-8B"`). |
+| `model_config.default_cache_dir` | Optional | Model cache dir; default `{base_path}/model_weight`. |
+
+Other file paths use `${base_path}`; override only if your layout differs.
+
+---
+
+## Quick start
+
+### Evaluation workflow (2 steps)
+
+```bash
+cd pho2disease
+```
+
+**Step 1 — Ensemble disease ranking** (fuses IC/frequency/embedding similarity; outputs final ranking and prompts):
+
+```bash
+python ensemble_disease_ranking.py --config prompt_config.json --prompt_steps 2
+```
+
+**Step 2 — LLM prediction** (local Qwen or OpenRouter; replace `xxx.json` with the prompt file from step 1):
+
+```bash
+# Local Qwen
+python phenotype_to_disease_prediction_bysteps.py --prompts_file ./prompt/xxx.json --model_name "Qwen/Qwen3-8B" --gpu_id 0
+
+# Or OpenRouter
+python phenotype_to_disease_prediction_bysteps.py --prompts_file ./prompt/xxx.json --model_name openrouter
+```
+
+### Interactive chat (rare-disease-chat)
+
+See the detailed setup and usage guide in [`rare-disease-chat/README.md`](rare-disease-chat/README.md) for Docker, local startup, and Web UI.
+
+### Phenotype embeddings
+
+```bash
+cd hpo_embedding/poincare_model
+python trainpoincare.py
+python extract_phenotype_embeddings.py final_poincare_phenotype_embeddings.csv -o ../phe2embedding_recomputed.json
+```
+
+---
+
+## More information
+
+### Data sources and paths
+
+#### 1. Evaluation / input data (`data/`)
 
 Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype IDs], [disease IDs]]` per sample.
 
@@ -31,7 +105,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 | `LIRICAL.json` / `.jsonl` | LIRICAL-related benchmark data |
 | `mygene2.json` / `.jsonl` | MyGene2-derived phenotype–disease data |
 
-### 2. HPO annotations (`hpo_annotations/`)
+#### 2. HPO annotations (`hpo_annotations/`)
 
 [Human Phenotype Ontology](https://hpo.jax.org/data/annotations) and disease–phenotype / gene–phenotype mappings.
 
@@ -44,7 +118,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 | `genes_to_disease.txt` | Gene → disease |
 | `disease_descriptions_batch.json` | Disease descriptions; can be produced by `batch_disease_scraper` |
 
-### 3. Orphanet (`orphanet_annotations/`)
+#### 3. Orphanet (`orphanet_annotations/`)
 
 [Orphanet](https://sciences.orphadata.com/orphanet-scientific-knowledge-files/) rare diseases and HPO phenotype associations.
 
@@ -55,7 +129,7 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 | `categorization_of_orphanet_diseases.csv` | **Produced by** `extract_disease_type_mapping.py` from Orphanet **Product 3** (Classifications of rare diseases) XMLs: OrphaNumber, Disorder_Name, Category (pipe-separated classification names) |
 | `disease_type_mapping.json` | **Produced by** `extract_disease_type_mapping.py` from the same Product 3 XMLs: disorder→type and classification mappings |
 
-### 4. MONDO (`mondo_annotations/`)
+#### 4. MONDO (`mondo_annotations/`)
 
 [MONDO Disease Ontology](https://monarchinitiative.org/kg/downloads) for ID alignment and rare-disease tagging.
 
@@ -63,9 +137,9 @@ Phenotype–disease pairs for inference and evaluation. JSON: one `[[phenotype I
 |------|-------------|
 | `mondo_parsed_full.json` | Parsed MONDO OBO (IDs, names, synonyms, equivalent IDs, rare subset, parents) via `parse_mondo_obo.py` |
 
-### 5. Disease–phenotype knowledge graph (`disease_phenotype_kg/`)
+#### 5. Disease–phenotype knowledge graph (`disease_phenotype_kg/`)
 
-CSV-based graph: disease, phenotype, gene nodes and edges. **All of these files are produced by** `generate_prompts_bysteps.py` **when run with** `--save_case_library_only` (see § 1 Generate multi-step prompts).
+CSV-based graph: disease, phenotype, gene nodes and edges. **All of these files are produced by** `generate_prompts_bysteps.py` **when run with** `--save_case_library_only` (see Quick start / generate multi-step prompts).
 
 **Upstream sources** (must be configured in `prompt_config.json` before running):
 
@@ -73,7 +147,7 @@ CSV-based graph: disease, phenotype, gene nodes and edges. **All of these files 
 - **Orphanet:** `Phenotypes_Associated_with_Rare_Disorders.json` (disease–phenotype), `rare_diseases_alignment.json` (IDs and names), `categorization_of_orphanet_diseases.csv` (disease type, is_rare)
 - **MONDO:** `mondo_parsed_full.json` (for ID alignment and merging)
 - **Disease descriptions:** `disease_descriptions_batch.json`
-- **Embeddings:** `phe2embedding_recomputed.json` 
+- **Embeddings:** `phe2embedding_recomputed.json`
 
 **Output:** `graph_output.output_dir` in `prompt_config.json` (e.g. `{base_path}/disease_phenotype_kg`). `graph_output.recomputed_ic_file` is where the recomputed IC is written.
 
@@ -88,7 +162,7 @@ CSV-based graph: disease, phenotype, gene nodes and edges. **All of these files 
 | `gene_to_phenotype_edges.csv` | Gene–phenotype (disease–phenotype–gene, with expansion rules) | HPO `genes_to_phenotype.txt`; optional, skipped if not configured |
 | `gene_to_disease_edges.csv` | Gene–disease | HPO `genes_to_disease.txt`; optional, skipped if not configured |
 
-### 6. Case library (`general_cases/`)
+#### 6. Case library (`general_cases/`)
 
 Real phenotype–disease cases for similar-case retrieval, embedding-based ranking, and few-shot.
 
@@ -99,7 +173,7 @@ Real phenotype–disease cases for similar-case retrieval, embedding-based ranki
 | `phenotype_disease_case_database.json` | Aggregated by disease (standard name, aliases, phenotypes, frequencies) |
 | `disease_ids_names.json` | Disease ID–name mapping |
 
-### 7. Phenotype embeddings (`hpo_embedding/`)
+#### 7. Phenotype embeddings (`hpo_embedding/`)
 
 Phenotype vectors and information content for semantic similarity and weighted ranking.
 
@@ -110,60 +184,9 @@ Phenotype vectors and information content for semantic similarity and weighted r
 | `poincare_model/trainpoincare.py` | Poincaré embedding training |
 | `poincare_model/extract_phenotype_embeddings.py` | Extract HP phenotypes from embedding CSV → `phe2embedding_*.json` |
 
----
+### Full usage and arguments
 
-## Installation
-
-**Requirements:** Python 3.12.
-
-### Option A: Conda
-
-```bash
-conda env create -f environment.yml
-conda activate vcap
-```
-
-### Option B: uv
-
-```bash
-uv venv --python 3.12 .venv
-uv pip install -r requirements.txt
-source .venv/bin/activate 
-```
-
-### Configuration
-
-Set `base_path` in config to your project root:
-
-| Config | Purpose |
-|--------|---------|
-| `pho2disease/prompt_config.json` | Prompt generation & ensemble: `input_file`, `phenotype_hpoa`, `obo_file`, `case_library`, `embedding_file`, `ic_file`, Orphanet/MONDO paths |
-| `pho2disease/inference_config.json` | Phenotype→disease prediction: model, API, `case_library`, output paths |
----
-
-## rare-disease-chat: Interactive Chat & MCP Server
-
-The [rare-disease-chat](rare-disease-chat/) subproject provides an interactive diagnosis interface built on the VCAP pipeline:
-
-- **MCP server** — Exposes phenotype extraction, disease diagnosis, and disease information retrieval as MCP tools
-- **Chat system** — LangGraph-based multi-agent chat with terminal (CLI) and Web UI modes
-- **Deployment** — Docker or local install; Web UI runs at `http://localhost:8080`
-
-**Quick start:**
-
-```bash
-cd rare-disease-chat
-# Option A: Docker — docker-compose up -d mcp-server && docker-compose run --rm chat-system
-# Option B: Local — ./mcp-server/start_server.sh, then ./chat-system/start_web_ui.sh or python phenotype_to_disease_controller_langchain_stream_api.py
-```
-
-See [rare-disease-chat/README.md](rare-disease-chat/README.md) for full setup, LLM configuration, and usage.
-
----
-
-## Usage
-
-### 1. Generate multi-step prompts — `generate_prompts_bysteps.py`
+#### 1. Generate multi-step prompts — `generate_prompts_bysteps.py`
 
 Build 2/3-step reasoning prompts from phenotype–disease JSON. Case extraction: `overlap`, `embedding`, or `both`.
 
@@ -210,7 +233,7 @@ python generate_prompts_bysteps.py --config prompt_config.json --prompt_steps 2 
 
 ---
 
-### 2. Ensemble disease ranking — `ensemble_disease_ranking.py`
+#### 2. Ensemble disease ranking — `ensemble_disease_ranking.py`
 
 Fuses IC-weighted similarity, annotation-frequency–weighted similarity, and embedding-based similar-case ranking; produces a final ranking via Z-statistics and optionally multi-step prompts.
 
@@ -252,7 +275,7 @@ python ensemble_disease_ranking.py --config prompt_config.json --prompt_steps 2 
 
 ---
 
-### 3. Phenotype→disease prediction (LLM) — `phenotype_to_disease_prediction_bysteps.py`
+#### 3. Phenotype→disease prediction (LLM) — `phenotype_to_disease_prediction_bysteps.py`
 
 Runs multi-step inference on prompt JSON from `generate_prompts_bysteps` or `ensemble_disease_ranking`, using local Qwen or OpenRouter. Reports accuracy, Top‑K, rank, and similarity.
 
@@ -297,51 +320,22 @@ python phenotype_to_disease_prediction_bysteps.py --prompts_file ./prompt/xxx.js
 | `--sample_indices`, `--num_samples` | Sample subset |
 | `--max_retries` | Retries on API failure |
 
----
+### Orphanet & MONDO preprocessing
 
-### 4. Orphanet & MONDO preprocessing
-
-**Orphanet XML → JSON:**
+#### Orphanet XML → JSON
 
 ```bash
 cd orphanet_annotations
-
-# Product 4: phenotype–rare disease associations
-python xml_to_json_converter_product4.py --input Phenotypes_Associated_with_Rare_Disorders.xml \
-  --output Phenotypes_Associated_with_Rare_Disorders.json
-
-# Product 1: disease alignment
-python xml_to_json_converter_product1.py --input rare_diseases_alignment.xml \
-  --output rare_diseases_alignment.json
+python xml_to_json_converter_product4.py --input Phenotypes_Associated_with_Rare_Disorders.xml --output Phenotypes_Associated_with_Rare_Disorders.json
+python xml_to_json_converter_product1.py --input rare_diseases_alignment.xml --output rare_diseases_alignment.json
 ```
 
-**`categorization_of_orphanet_diseases.csv` and `disease_type_mapping.json`** — from Orphanet **Product 3** (Classifications of rare diseases):
+#### Product 3 (Classifications of rare diseases)
 
-1. Download XML package "Classifications of rare diseases" from Orphanet.
-2. Extract the XMLs into a directory such as `orphanet_annotations/Classifications of rare diseases/`.
-3. Run `extract_disease_type_mapping.py`; it writes both `disease_type_mapping.json` and `categorization_of_orphanet_diseases.csv`:
+Download XML package from Orphanet, extract, then:
 
 ```bash
 cd orphanet_annotations
-
-# Default: --input-dir "Classifications of rare diseases", --output disease_type_mapping.json, --categories-output categorization_of_orphanet_diseases.csv
 python extract_disease_type_mapping.py
-
-# Custom paths
-python extract_disease_type_mapping.py --input-dir /path/to/Classifications_of_rare_diseases \
-  --output disease_type_mapping.json --categories-output categorization_of_orphanet_diseases.csv
-```
-
----
-
-### 5. Phenotype embeddings
-
-```bash
-cd hpo_embedding/poincare_model
-
-# 1. Poincaré training → produces final_poincare_phenotype_embeddings.csv
-python trainpoincare.py
-
-# 2. Extract HP phenotypes from the CSV → phe2embedding_recomputed.json
-python extract_phenotype_embeddings.py final_poincare_phenotype_embeddings.csv -o ../phe2embedding_recomputed.json
+# Custom: --input-dir /path/to/Classifications_of_rare_diseases --output disease_type_mapping.json --categories-output categorization_of_orphanet_diseases.csv
 ```
