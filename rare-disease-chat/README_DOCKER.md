@@ -4,47 +4,39 @@ This document explains how to use Docker to start MCP Server and Dashboard WebUI
 
 ## Quick Start
 
-### 1. Build Image
-
-Execute in the project root directory (`rare-disease-chat/`):
+The script can be copied to any location and run from there. Since it uses Docker, the container is independent of where the script is executed:
 
 ```bash
-docker build -t rarellm-all-in-one:latest .
+# Run from any location 
+./auto_run_docker.sh start
 ```
 
-### 2. Run Container
+The script will automatically perform the following operations:
+1. Check and build the Docker image (if it doesn't exist)
+2. Extract configuration files to the `docker_configs/` directory
+3. Start the container with mounted configuration files
+4. Display service access addresses
 
-```bash
-docker run -d \
-  --name rarellm-all \
-  -p 3000:3000 \
-  -p 8080:8080 \
-  rarellm-all-in-one:latest
-```
-
-### 3. Access Services
-
+**Access Services**:
 - **MCP Server**: http://localhost:3000
 - **Dashboard WebUI**: http://localhost:8080/rdagent/
 
-### 4. View Logs
-
+**Other Common Commands**:
 ```bash
-# View container logs
-docker logs -f rarellm-all
+# View logs
+./auto_run_docker.sh logs
 
-# View MCP Server logs
-docker exec rarellm-all tail -f /tmp/mcp.log
+# Check status
+./auto_run_docker.sh status
 
-# View Dashboard logs
-docker exec rarellm-all tail -f /tmp/dashboard.log
-```
+# Stop container
+./auto_run_docker.sh stop
 
-### 5. Stop Services
+# Restart container
+./auto_run_docker.sh restart
 
-```bash
-docker stop rarellm-all
-docker rm rarellm-all
+# Remove container
+./auto_run_docker.sh rm
 ```
 
 ## Advanced Configuration
@@ -63,15 +55,32 @@ docker run -d \
 
 ### Mount Configuration Files
 
-To customize configurations, you can mount configuration files:
+To customize configurations, you can mount configuration files. **Important**: You must first extract these files from the container before mounting them. If the files don't exist on your host, Docker will create directories instead, causing mount errors.
+
+**Step 1: Extract files from container (run from any directory)**
 
 ```bash
+# Create a temporary container to extract files
+docker create --name temp-config rarellm-all-in-one:latest
+
+# Extract configuration files to current directory
+docker cp temp-config:/app/chat-system/inference_config.json ./inference_config.json
+docker cp temp-config:/app/mcp-server/mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json ./prompt_config_forKG.json
+
+# Remove temporary container
+docker rm temp-config
+```
+
+**Step 2: Mount the extracted files**
+
+```bash
+# Now mount them (run from the directory where you extracted the files)
 docker run -d \
   --name rarellm-all \
   -p 3000:3000 \
   -p 8080:8080 \
-  -v $(pwd)/chat-system/inference_config.json:/app/chat-system/inference_config.json \
-  -v $(pwd)/mcp-server/mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json:/app/mcp-server/mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json \
+  -v $(pwd)/inference_config.json:/app/chat-system/inference_config.json \
+  -v $(pwd)/prompt_config_forKG.json:/app/mcp-server/mcp_simple_tool/scripts/rare_disease_diagnose/prompt_config_forKG.json \
   rarellm-all-in-one:latest
 ```
 
@@ -180,35 +189,3 @@ docker run -d \
 
 **Note**: You need to restart the container after code changes for them to take effect.
 
-## Using docker-compose
-
-You can also create a simple `docker-compose.all.yml` file:
-
-```yaml
-version: '3.8'
-
-services:
-  rarellm-all:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: rarellm-all-in-one:latest
-    container_name: rarellm-all
-    ports:
-      - "3000:3000"
-      - "8080:8080"
-    environment:
-      - MCP_PORT=3000
-      - DASHBOARD_PORT=8080
-      - MCP_ENDPOINT=http://localhost:3000/mcp/
-      - MCP_TIMEOUT=600
-    volumes:
-      - ./mcp-server/mcp_simple_tool/data:/app/mcp-server/mcp_simple_tool/data
-    restart: unless-stopped
-```
-
-Then run:
-
-```bash
-docker-compose -f docker-compose.all.yml up -d
-```

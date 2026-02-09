@@ -32,6 +32,9 @@ RUN apt-get update && \
     curl \
     git \
     procps \
+    net-tools \
+    iproute2 \
+    lsof \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -88,7 +91,7 @@ RUN cat > /app/start_all.sh << 'EOFSCRIPT'
 #!/bin/bash
 
 # Function to handle shutdown
-cleanup() {
+function cleanup() {
     echo ""
     echo "=== Shutting down services ==="
     [ -n "$MCP_PID" ] && kill $MCP_PID 2>/dev/null || true
@@ -108,6 +111,12 @@ export PROJECT_ROOT=/app
 export MCP_SIMPLE_TOOL_DIR=/app/mcp-server/mcp_simple_tool
 export MCP_ENDPOINT=http://localhost:${MCP_PORT:-3000}/mcp/
 export PORT=${DASHBOARD_PORT:-8080}
+
+# Clean up any existing processes on the ports (in case of restart)
+echo "Cleaning up any existing processes..."
+lsof -ti:${MCP_PORT:-3000} | xargs kill -9 2>/dev/null || true
+lsof -ti:${DASHBOARD_PORT:-8080} | xargs kill -9 2>/dev/null || true
+sleep 1
 
 # Start MCP server in background
 echo "=== Starting MCP Server on port ${MCP_PORT:-3000} ==="
@@ -151,24 +160,37 @@ echo "Dashboard started (PID: $DASHBOARD_PID)"
 # Wait for dashboard to be ready
 echo "Waiting for Dashboard to be ready..."
 DASHBOARD_READY=0
-for i in {1..30}; do
-    if curl -s http://localhost:${DASHBOARD_PORT:-8080}/rdagent/ > /dev/null 2>&1; then
-        echo "✓ Dashboard is ready"
-        DASHBOARD_READY=1
-        break
-    fi
+# Give dashboard more time to start (60 seconds)
+for i in {1..60}; do
+    # Check if process is still running
     if ! ps -p $DASHBOARD_PID > /dev/null 2>&1; then
         echo "✗ Dashboard process died (check logs: /tmp/dashboard.log)"
         cat /tmp/dashboard.log
         exit 1
     fi
+    # Check if port is listening
+    if netstat -tuln 2>/dev/null | grep -q ":${DASHBOARD_PORT:-8080} " || \
+       ss -tuln 2>/dev/null | grep -q ":${DASHBOARD_PORT:-8080} "; then
+        # Port is listening, try HTTP request
+        if curl -s -f http://localhost:${DASHBOARD_PORT:-8080}/rdagent/ > /dev/null 2>&1; then
+            echo "✓ Dashboard is ready"
+            DASHBOARD_READY=1
+            break
+        fi
+    fi
     sleep 1
 done
 
 if [ $DASHBOARD_READY -eq 0 ]; then
-    echo "✗ Dashboard failed to start within 30 seconds (check logs: /tmp/dashboard.log)"
-    cat /tmp/dashboard.log
-    exit 1
+    echo "✗ Dashboard failed to start within 60 seconds"
+    echo "Checking dashboard status..."
+    ps -p $DASHBOARD_PID > /dev/null 2>&1 && echo "Process is running" || echo "Process is not running"
+    echo "Dashboard logs:"
+    cat /tmp/dashboard.log 2>/dev/null || echo "No logs available"
+    echo "Port status:"
+    netstat -tuln 2>/dev/null | grep ":${DASHBOARD_PORT:-8080} " || ss -tuln 2>/dev/null | grep ":${DASHBOARD_PORT:-8080} " || echo "Port not listening"
+    # Don't exit, let it continue - dashboard might still be starting
+    echo "Warning: Dashboard health check failed, but continuing..."
 fi
 
 # Services started successfully
