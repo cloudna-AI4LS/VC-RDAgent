@@ -2,6 +2,17 @@
 
 This document explains how to use Docker to start MCP Server and Dashboard WebUI with one command.
 
+## Build Image
+
+Before using the one-click script or running the container manually, build the Docker image once. Run from the **rare-disease-chat** directory (where the root `Dockerfile` is located):
+
+```bash
+cd rare-disease-chat
+docker build -t rarellm-all-in-one:latest .
+```
+
+Build may take several minutes (installing dependencies, etc.). After the build completes, use the Quick Start below or the `docker run` examples in Advanced Configuration.
+
 ## Quick Start
 
 The script can be copied to any location and run from there. Since it uses Docker, the container is independent of where the script is executed:
@@ -12,7 +23,7 @@ The script can be copied to any location and run from there. Since it uses Docke
 ```
 
 The script will automatically perform the following operations:
-1. Check and build the Docker image (if it doesn't exist)
+1. Check that the Docker image exists (if not, build it first—see [Build Image](#build-image) above)
 2. Extract configuration files to the `docker_configs/` directory
 3. Start the container with mounted configuration files
 4. Display service access addresses
