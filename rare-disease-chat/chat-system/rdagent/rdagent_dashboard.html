@@ -867,6 +867,7 @@
 
             let sessionId = null;
             let isProcessing = false;
+            var currentWs = null;  // 当前 WebSocket，刷新/关闭页面前主动关闭以便后台立即停止
             const stepStates = {};
             var queueShowTimer = null;  // 排队满 1 秒后才在 Pipeline 前显示 Queue 标签
             var hasToolCallForPhase = { info_extraction: false, workflow: false };
@@ -1335,98 +1336,91 @@
                 addMessage('assistant', '', assistantBubbleId);
                 var assistantBubble = document.getElementById(assistantBubbleId);
 
-                try {
-                    var response = await fetch('/api/chat/stream_dashboard', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ query: query, session_id: sessionId })
-                    });
-                    if (!response.ok) throw new Error('HTTP ' + response.status);
-
-                    var reader = response.body.getReader();
-                    var decoder = new TextDecoder();
-                    var buffer = '';
-
-                    while (true) {
-                        var { done, value } = await reader.read();
-                        if (done) break;
-                        buffer += decoder.decode(value, { stream: true });
-                        var lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-
-                        for (var i = 0; i < lines.length; i++) {
-                            var line = lines[i];
-                            if (!line.startsWith('data: ')) continue;
-                            try {
-                                var data = JSON.parse(line.slice(6));
-                                var type = data.type;
-                                var payload = data.data;
-                                var phase = data.phase || '';
-
-                                if (type === 'status') {
-                                    setStatusLine(payload, true, phase === 'queue');
-                                    updatePipelineStep(phase, payload);
-                                    appendStatusLog(phase, payload);
-                                    if (phase === 'queue') setBubbleThinking(assistantBubble, 'Waiting...');
-                                    else setBubbleThinking(assistantBubble, 'Thinking...');
-                                } else if (type === 'step') {
-                                    var st = data.status || 'running';
-                                    var p = data.phase;
-                                    if (p) {
-                                        if (st === 'completed' && (p === 'info_extraction' || p === 'workflow'))
-                                            stepStates[p] = hasToolCallForPhase[p] ? 'completed' : 'pending';
-                                        else
-                                            stepStates[p] = st === 'completed' ? 'completed' : (st === 'running' ? 'running' : (stepStates[p] || 'pending'));
-                                    }
-                                    renderPipeline();
-                                } else if (type === 'content') {
-                                    appendToMessage(assistantBubble, payload);
-                                } else if (type === 'reasoning') {
-                                    appendReasoningUI(phase, payload);
-                                } else if (type === 'tool_response') {
-                                    var name = data.tool_name != null ? data.tool_name : '';
-                                    var text = data.data != null ? data.data : (payload != null ? payload : '');
-                                    if (!name && text) {
-                                        if (text.indexOf('[Info extraction]') === 0) { name = 'info_extraction'; text = text.replace(/^\s*\[Info extraction\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || '[Completed] Information extraction'; }
-                                        else if (text.indexOf('[Workflow]') === 0) { name = 'workflow'; text = text.replace(/^\s*\[Workflow\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || text; }
-                                        else name = 'tool';
-                                    }
-                                    if (!name) name = 'tool';
-                                    if (name === 'disease_diagnosis_tool') {
-                                        hasToolCallForPhase.workflow = true;
-                                        stepStates['workflow'] = 'completed';
-                                        renderPipeline();
-                                    } else if (name) hasToolCallForPhase.info_extraction = true;
-                                    appendToolResponse(name, text);
-                                } else if (type === 'error') {
-                                    if (assistantBubble) {
-                                        assistantBubble.classList.remove('bubble-pending');
-                                        assistantBubble.dataset.rawContent = '';
-                                        assistantBubble.innerHTML = '<p style="color:var(--error)">Request failed. Please try again.</p>';
-                                    }
-                                    showError(payload);
-                                    saveConversation();
-                                    resetUI();
-                                    return;
-                                } else if (type === 'done') {
-                                    addCopyButtonToBubble(assistantBubble);
-                                    setStatusLine('', false);
-                                    saveConversation();
-                                    resetUI();
-                                    return;
-                                }
-                            } catch (e) { console.warn('Parse stream:', e); }
+                function handleStreamEvent(data) {
+                    var type = data.type;
+                    var payload = data.data;
+                    var phase = data.phase || '';
+                    if (type === 'keepalive') return true;
+                    if (type === 'status') {
+                        setStatusLine(payload, true, phase === 'queue');
+                        updatePipelineStep(phase, payload);
+                        appendStatusLog(phase, payload);
+                        if (phase === 'queue') setBubbleThinking(assistantBubble, 'Waiting...');
+                        else setBubbleThinking(assistantBubble, 'Thinking...');
+                    } else if (type === 'step') {
+                        var st = data.status || 'running';
+                        var p = data.phase;
+                        if (p) {
+                            if (st === 'completed' && (p === 'info_extraction' || p === 'workflow'))
+                                stepStates[p] = hasToolCallForPhase[p] ? 'completed' : 'pending';
+                            else
+                                stepStates[p] = st === 'completed' ? 'completed' : (st === 'running' ? 'running' : (stepStates[p] || 'pending'));
                         }
+                        renderPipeline();
+                    } else if (type === 'content') {
+                        appendToMessage(assistantBubble, payload);
+                    } else if (type === 'reasoning') {
+                        appendReasoningUI(phase, payload);
+                    } else if (type === 'tool_response') {
+                        var name = data.tool_name != null ? data.tool_name : '';
+                        var text = data.data != null ? data.data : (payload != null ? payload : '');
+                        if (!name && text) {
+                            if (text.indexOf('[Info extraction]') === 0) { name = 'info_extraction'; text = text.replace(/^\s*\[Info extraction\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || '[Completed] Information extraction'; }
+                            else if (text.indexOf('[Workflow]') === 0) { name = 'workflow'; text = text.replace(/^\s*\[Workflow\]\s*/, '').split(/\s*\([^)]*\)/)[0].trim() || text; }
+                            else name = 'tool';
+                        }
+                        if (!name) name = 'tool';
+                        if (name === 'disease_diagnosis_tool') {
+                            hasToolCallForPhase.workflow = true;
+                            stepStates['workflow'] = 'completed';
+                            renderPipeline();
+                        } else if (name) hasToolCallForPhase.info_extraction = true;
+                        appendToolResponse(name, text);
+                    } else if (type === 'error') {
+                        if (assistantBubble) {
+                            assistantBubble.classList.remove('bubble-pending');
+                            assistantBubble.dataset.rawContent = '';
+                            assistantBubble.innerHTML = '<p style="color:var(--error)">Request failed. Please try again.</p>';
+                        }
+                        setStatusLine('', false);
+                        showError(payload);
+                        saveConversation();
+                        return false;
+                    } else if (type === 'done') {
+                        addCopyButtonToBubble(assistantBubble);
+                        setStatusLine('', false);
+                        saveConversation();
+                        return false;
                     }
-                    addCopyButtonToBubble(assistantBubble);
-                    setStatusLine('', false);
+                    return true;
+                }
+
+                try {
+                    var wsScheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    var wsUrl = wsScheme + '//' + location.host + '/api/chat/ws';
+                    var ws = new WebSocket(wsUrl);
+                    currentWs = ws;
+                    ws.onopen = function() {
+                        ws.send(JSON.stringify({ query: query, session_id: sessionId }));
+                    };
+                    ws.onmessage = function(ev) {
+                        try {
+                            var data = JSON.parse(ev.data);
+                            if (!handleStreamEvent(data)) ws.close();
+                        } catch (e) { console.warn('WS parse:', e); }
+                    };
+                    ws.onerror = function() { showError('WebSocket error'); };
+                    ws.onclose = function() { currentWs = null; resetUI(); };
                 } catch (err) {
                     showError(err.message);
                     saveConversation();
+                    resetUI();
                 }
-                resetUI();
             }
 
+            window.addEventListener('beforeunload', function() {
+                if (currentWs && currentWs.readyState === WebSocket.OPEN) currentWs.close();
+            });
             document.getElementById('sendBtn').addEventListener('click', sendMessage);
             document.getElementById('userInput').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }

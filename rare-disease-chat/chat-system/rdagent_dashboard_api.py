@@ -3,7 +3,8 @@
 RDAgent Dashboard API — standalone backend for the Professional Agent UI.
 
 This module provides a separate FastAPI app for the VCAP-RDAgent dashboard:
-- POST /api/chat/stream_dashboard — streaming endpoint (no page guard)
+- POST /api/chat/stream_dashboard — streaming endpoint (SSE, no page guard)
+- WebSocket /api/chat/ws — same pipeline over WebSocket (one message per connection or per client message)
 - GET /rdagent, /rdagent/ — serve rdagent_dashboard.html
 - Static files under /rdagent/
 
@@ -14,13 +15,14 @@ LLM config: start_dashboard.sh writes inference_config.json from script variable
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
+import queue
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 # Import only from existing modules (no modification of those files)
 from phenotype_to_disease_controller_langchain_stream_api import (
@@ -92,7 +94,10 @@ async def _enrich_stream(
 # ---------------------------------------------------------------------------
 
 # Task queue: limit concurrent pipeline runs (1 = strict queue, one at a time)
-TASK_QUEUE_SIZE = int(os.environ.get("TASK_QUEUE_SIZE", "1"))
+try:
+    TASK_QUEUE_SIZE = max(1, int(os.environ.get("TASK_QUEUE_SIZE", "1")))
+except (ValueError, TypeError):
+    TASK_QUEUE_SIZE = 1
 _task_semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -103,8 +108,109 @@ def _get_task_semaphore() -> asyncio.Semaphore:
     return _task_semaphore
 
 
+async def _consume_stream_into_queue(
+    query: str, messages: List[BaseMessage], out_queue: queue.Queue
+) -> None:
+    try:
+        base_stream = controller_pipeline_stream_en(query, messages)
+        enriched_stream = _enrich_stream(base_stream)
+        try:
+            async for chunk in enriched_stream:
+                out_queue.put(("chunk", chunk))
+        except Exception as e:
+            out_queue.put(("error", str(e)))
+    except Exception as e:
+        out_queue.put(("error", str(e)))
+    finally:
+        out_queue.put(("end", None))
+
+
+def _run_pipeline_in_thread(
+    query: str,
+    messages: List[BaseMessage],
+    out_queue: queue.Queue,
+    loop_holder: Optional[List[asyncio.AbstractEventLoop]] = None,
+    task_holder: Optional[List[asyncio.Task]] = None,
+) -> None:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    if loop_holder is not None:
+        loop_holder.append(loop)
+    try:
+        task = loop.create_task(_consume_stream_into_queue(query, messages, out_queue))
+        if task_holder is not None:
+            task_holder.append(task)
+        loop.run_until_complete(task)
+    except asyncio.CancelledError:
+        # _consume_stream_into_queue's finally already put ("end", None); no need to put again
+        pass
+    except Exception as e:
+        try:
+            out_queue.put(("error", str(e)))
+            out_queue.put(("end", None))
+        except Exception:
+            pass
+    finally:
+        if task_holder:
+            try:
+                task_holder.clear()
+            except Exception:
+                pass
+        if loop_holder:
+            try:
+                loop_holder.clear()
+            except Exception:
+                pass
+        loop.close()
+
+
+def _serialize_messages_for_process(messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+    """Serialize conversation messages to picklable dicts for the worker process."""
+    out = []
+    for m in messages:
+        name = type(m).__name__
+        content = getattr(m, "content", "")
+        out.append({"type": name, "content": content})
+    return out
+
+
+def _run_pipeline_process(
+    query: str,
+    messages_data: List[Dict[str, Any]],
+    out_queue: multiprocessing.Queue,
+) -> None:
+    """
+    Run pipeline in a subprocess. When the client disconnects, the main process
+    can terminate() this process to immediately stop MCP/tool execution.
+    """
+    import asyncio
+
+    from phenotype_to_disease_controller_langchain_stream_api import AIMessage, BaseMessage, HumanMessage
+
+    def _deserialize_messages(data: List[Dict[str, Any]]) -> List[BaseMessage]:
+        result = []
+        for d in data:
+            content = d.get("content", "")
+            if d.get("type") == "HumanMessage":
+                result.append(HumanMessage(content=content))
+            else:
+                result.append(AIMessage(content=content))
+        return result
+
+    messages = _deserialize_messages(messages_data)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_consume_stream_into_queue(query, messages, out_queue))
+    except Exception:
+        pass
+    finally:
+        loop.close()
+
+
 app = FastAPI(
-    title="VCAP-RDAgent Dashboard API",
+    title="VC-RDAgent Dashboard API",
     description="Professional agent dashboard: streaming, steps, reasoning.",
 )
 
@@ -163,6 +269,17 @@ async def get_config():
     return {"model": _get_model_name_from_config()}
 
 
+# Patch injected into served HTML: skip empty assistant messages on load so refresh
+# does not show "Waiting..." for in-flight replies that were never completed.
+_INDENT = "                        "  # 24 spaces, matches loadConversation for-loop in HTML
+_HTML_LOAD_CONVERSATION_SKIP_EMPTY_ASSISTANT = (
+    f"var item = list[i];\n{_INDENT}var bubble = addMessage(item.role, item.content, item.msgId);"
+)
+_HTML_LOAD_CONVERSATION_SKIP_EMPTY_ASSISTANT_PATCH = (
+    f"var item = list[i];\n{_INDENT}if (item.role === 'assistant' && !item.content) continue;\n{_INDENT}var bubble = addMessage(item.role, item.content, item.msgId);"
+)
+
+
 @app.get("/rdagent", response_class=HTMLResponse)
 @app.get("/rdagent/", response_class=HTMLResponse)
 async def rdagent_root():
@@ -170,7 +287,15 @@ async def rdagent_root():
     path = os.path.join(RDAGENT_DIR, "rdagent_dashboard.html")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+            html = f.read()
+        # Avoid restoring empty assistant messages so refresh does not show "Waiting..."
+        if _HTML_LOAD_CONVERSATION_SKIP_EMPTY_ASSISTANT in html:
+            html = html.replace(
+                _HTML_LOAD_CONVERSATION_SKIP_EMPTY_ASSISTANT,
+                _HTML_LOAD_CONVERSATION_SKIP_EMPTY_ASSISTANT_PATCH,
+                1,
+            )
+        return html
     from fastapi.responses import HTMLResponse as HR
     return HR(content="<h1>RDAgent not found</h1>", status_code=404)  # type: ignore[arg-type]
 
@@ -191,7 +316,7 @@ async def chat_stream_dashboard(payload: ChatRequest):
     if session_id not in sessions_dashboard:
         sessions_dashboard[session_id] = {
             "messages": [],
-            "created_at": asyncio.get_event_loop().time(),
+            "created_at": asyncio.get_running_loop().time(),
         }
 
     session = sessions_dashboard[session_id]
@@ -206,16 +331,90 @@ async def chat_stream_dashboard(payload: ChatRequest):
             total_tokens = count_messages_tokens(conversation_messages)
 
     async def generate():
+        """
+        Streaming wrapper around controller_pipeline_stream_en with heartbeat.
+
+        - Uses a semaphore to limit concurrent runs.
+        - Forwards chunks from the controller (plus step events from _enrich_stream)
+          to the SSE client.
+        - If no chunk is produced for KEEPALIVE_INTERVAL seconds, sends a
+          lightweight keepalive event so the frontend knows the backend is alive.
+        """
         sem = _get_task_semaphore()
-        # Notify client they are in queue (keeps connection alive while waiting)
-        yield f"data: {json.dumps({'type': 'status', 'data': 'Waiting in queue...', 'phase': 'queue'}, ensure_ascii=False)}\n\n"
+
+        # Send a lightweight queue status event before acquiring the semaphore,
+        # so the frontend can show "waiting in queue" even while this request
+        # is still pending for a running pipeline.
+        try:
+            queue_event = json.dumps(
+                {"type": "status", "data": "Waiting in queue...", "phase": "queue"},
+                ensure_ascii=False,
+            )
+            yield f"data: {queue_event}\n\n"
+        except Exception:
+            # Queue hint is purely cosmetic; do not affect the main pipeline.
+            pass
+
         async with sem:
             full_response = ""
             try:
-                base_stream = controller_pipeline_stream_en(
-                    payload.query, conversation_messages
-                )
-                async for chunk in _enrich_stream(base_stream):
+                KEEPALIVE_INTERVAL = float(os.environ.get("DASHBOARD_KEEPALIVE_INTERVAL", "10"))
+            except (ValueError, TypeError):
+                KEEPALIVE_INTERVAL = 10.0
+            chunk_queue: multiprocessing.Queue = multiprocessing.Queue()
+            messages_data = _serialize_messages_for_process(conversation_messages)
+            worker_process = multiprocessing.Process(
+                target=_run_pipeline_process,
+                args=(payload.query, messages_data, chunk_queue),
+                daemon=True,
+            )
+            worker_process.start()
+
+            def _terminate_worker() -> None:
+                try:
+                    if worker_process.is_alive():
+                        worker_process.terminate()
+                        worker_process.join(timeout=2.0)
+                        if worker_process.is_alive():
+                            worker_process.kill()
+                            worker_process.join(timeout=1.0)
+                except Exception as e:
+                    logger.warning("_terminate_worker: %s", e)
+
+            try:
+                loop = asyncio.get_running_loop()
+                while True:
+                    try:
+                        kind, value = await loop.run_in_executor(
+                            None,
+                            lambda q=chunk_queue, t=KEEPALIVE_INTERVAL: q.get(timeout=t),
+                        )
+                    except queue.Empty:
+                        try:
+                            keepalive = json.dumps(
+                                {"type": "keepalive", "data": "", "phase": "keepalive"},
+                                ensure_ascii=False,
+                            )
+                            yield f"data: {keepalive}\n\n"
+                        except Exception:
+                            pass
+                        continue
+
+                    if kind == "end":
+                        break
+                    if kind == "error":
+                        try:
+                            err = json.dumps(
+                                {"type": "error", "data": value or "Unknown error", "phase": "error"},
+                                ensure_ascii=False,
+                            )
+                            yield f"data: {err}\n\n"
+                        except Exception:
+                            pass
+                        _terminate_worker()
+                        break
+
+                    chunk = value
                     yield f"data: {chunk}\n\n"
                     try:
                         chunk_data = json.loads(chunk)
@@ -226,12 +425,16 @@ async def chat_stream_dashboard(payload: ChatRequest):
 
                 if full_response:
                     session["messages"].append(AIMessage(content=full_response))
+                worker_process.join(timeout=5.0)
             except asyncio.CancelledError:
                 logger.info("stream_dashboard: client disconnected, request cancelled")
+                _terminate_worker()
             except (ConnectionResetError, ConnectionError, BrokenPipeError) as e:
                 logger.info("stream_dashboard: client disconnected (%s)", type(e).__name__)
+                _terminate_worker()
             except Exception as e:
                 logger.exception("stream_dashboard generate() failed")
+                _terminate_worker()
                 try:
                     error_chunk = json.dumps(
                         {"type": "error", "data": str(e) or "Unknown error", "phase": "error"},
@@ -250,6 +453,193 @@ async def chat_stream_dashboard(payload: ChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _run_pipeline_and_send_ws(
+    websocket: WebSocket,
+    query: str,
+    conversation_messages: List[BaseMessage],
+    session: Dict[str, Any],
+    sem: asyncio.Semaphore,
+) -> None:
+    """
+    Run pipeline in subprocess and send chunks to WebSocket. Same logic as SSE generate()
+    but sends raw JSON text frames. Caller must hold sem and handle disconnect.
+    """
+    try:
+        KEEPALIVE_INTERVAL = float(os.environ.get("DASHBOARD_KEEPALIVE_INTERVAL", "10"))
+    except (ValueError, TypeError):
+        KEEPALIVE_INTERVAL = 10.0
+    # Shorter probe interval for WebSocket so we detect client disconnect (e.g. refresh) sooner
+    try:
+        WS_PROBE_INTERVAL = float(os.environ.get("DASHBOARD_WS_PROBE_INTERVAL", "1"))
+    except (ValueError, TypeError):
+        WS_PROBE_INTERVAL = 1.0
+    queue_get_timeout = min(WS_PROBE_INTERVAL, KEEPALIVE_INTERVAL)
+    chunk_queue: multiprocessing.Queue = multiprocessing.Queue()
+    messages_data = _serialize_messages_for_process(conversation_messages)
+    worker_process = multiprocessing.Process(
+        target=_run_pipeline_process,
+        args=(query, messages_data, chunk_queue),
+        daemon=True,
+    )
+    worker_process.start()
+
+    def _terminate_worker() -> None:
+        try:
+            if worker_process.is_alive():
+                worker_process.terminate()
+                worker_process.join(timeout=2.0)
+                if worker_process.is_alive():
+                    worker_process.kill()
+                    worker_process.join(timeout=1.0)
+        except Exception as e:
+            logger.warning("_terminate_worker: %s", e)
+
+    loop = asyncio.get_running_loop()
+    full_response = ""
+    # Queue status is sent by chat_ws before acquiring semaphore so client sees it while waiting
+    try:
+        while True:
+            try:
+                kind, value = await loop.run_in_executor(
+                    None,
+                    lambda q=chunk_queue, t=queue_get_timeout: q.get(timeout=t),
+                )
+            except queue.Empty:
+                try:
+                    keepalive = json.dumps(
+                        {"type": "keepalive", "data": "", "phase": "keepalive"},
+                        ensure_ascii=False,
+                    )
+                    await websocket.send_text(keepalive)
+                except Exception:
+                    _terminate_worker()
+                    return
+                continue
+
+            if kind == "end":
+                break
+            if kind == "error":
+                try:
+                    err = json.dumps(
+                        {"type": "error", "data": value or "Unknown error", "phase": "error"},
+                        ensure_ascii=False,
+                    )
+                    await websocket.send_text(err)
+                except Exception:
+                    pass
+                _terminate_worker()
+                return
+
+            chunk = value
+            try:
+                await websocket.send_text(chunk)
+            except Exception:
+                _terminate_worker()
+                return
+            try:
+                chunk_data = json.loads(chunk)
+                if chunk_data.get("type") == "content":
+                    full_response += chunk_data.get("data", "")
+            except Exception:
+                pass
+
+        if full_response:
+            session["messages"].append(AIMessage(content=full_response))
+        worker_process.join(timeout=5.0)
+    except (WebSocketDisconnect, ConnectionResetError, ConnectionError, BrokenPipeError) as e:
+        logger.info("chat_ws: client disconnected (%s)", type(e).__name__)
+        _terminate_worker()
+    except Exception as e:
+        logger.exception("chat_ws: pipeline failed")
+        _terminate_worker()
+        try:
+            error_chunk = json.dumps(
+                {"type": "error", "data": str(e) or "Unknown error", "phase": "error"},
+                ensure_ascii=False,
+            )
+            await websocket.send_text(error_chunk)
+        except Exception:
+            pass
+
+
+@app.websocket("/api/chat/ws")
+async def chat_ws(websocket: WebSocket):
+    """
+    WebSocket endpoint: same pipeline as POST /api/chat/stream_dashboard.
+
+    Protocol:
+      - Client sends JSON text frames: {"query": "...", "session_id": "..."}.
+      - Server sends a sequence of JSON text frames (same shape as SSE data payload):
+        {"type": "status"|"step"|"content"|"reasoning"|"tool_response"|"error"|"done"|"keepalive", "data": "...", "phase": "..."}
+    One request per client message: after "done" or "error", client may send another message
+    on the same connection for the next turn.
+    """
+    await websocket.accept()
+    sem = _get_task_semaphore()
+
+    while True:
+        try:
+            raw = await websocket.receive_text()
+        except WebSocketDisconnect:
+            return
+        except RuntimeError as e:
+            # Client closed (e.g. refresh): Starlette may raise "WebSocket is not connected"
+            if "not connected" in str(e).lower() or "accept" in str(e).lower():
+                return
+            raise
+        try:
+            payload = json.loads(raw)
+            query = (payload.get("query") or "").strip()
+            session_id = payload.get("session_id") or f"dashboard_session_{len(sessions_dashboard)}"
+        except Exception:
+            try:
+                await websocket.send_text(json.dumps(
+                    {"type": "error", "data": "Invalid JSON or missing query", "phase": "error"},
+                    ensure_ascii=False,
+                ))
+            except Exception:
+                pass
+            continue
+        if not query:
+            try:
+                await websocket.send_text(json.dumps(
+                    {"type": "error", "data": "Empty query", "phase": "error"},
+                    ensure_ascii=False,
+                ))
+            except Exception:
+                pass
+            continue
+
+        if session_id not in sessions_dashboard:
+            sessions_dashboard[session_id] = {
+                "messages": [],
+                "created_at": asyncio.get_running_loop().time(),
+            }
+        session = sessions_dashboard[session_id]
+        user_msg = HumanMessage(content=query)
+        session["messages"].append(user_msg)
+        conversation_messages = session["messages"][:-1]
+
+        total_tokens = count_messages_tokens(conversation_messages)
+        if total_tokens > MAX_TOKENS:
+            while total_tokens > MAX_TOKENS and len(conversation_messages) > 0:
+                conversation_messages.pop(0)
+                total_tokens = count_messages_tokens(conversation_messages)
+
+        # Send queue status before acquiring semaphore so client shows "Queue" while actually waiting
+        try:
+            queue_event = json.dumps(
+                {"type": "status", "data": "Waiting in queue...", "phase": "queue"},
+                ensure_ascii=False,
+            )
+            await websocket.send_text(queue_event)
+        except Exception:
+            continue
+
+        async with sem:
+            await _run_pipeline_and_send_ws(websocket, query, conversation_messages, session, sem)
 
 
 # Mount static files so /rdagent/rdagent_dashboard.html and assets work
