@@ -10,9 +10,10 @@ from typing import List, Dict, Optional, TypedDict, Annotated, Any
 from mcp import types
 # from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages.utils import convert_to_openai_messages
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
-from langchain.chat_models import init_chat_model
+from openai import OpenAI
 
 # Add parent directory to path for importing other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,36 +74,214 @@ class DiagnosisState(TypedDict):
     pause_step: Annotated[int, "step where the process was paused"]
 
 
-# Load configuration and create model instance
+# Load configuration (same pattern as phenotype_to_disease_controller_dashscope_api)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 config_file = os.path.join(BASE_DIR, 'scripts/rare_disease_diagnose/prompt_config_forKG.json')
 config = load_config(config_file)
-
-# Get model configuration from config file
 model_config = config.get('model_config', {})
 
-# Build init_chat_model arguments
-init_args = {
-    'model': model_config.get('model', 'Qwen/Qwen3-8B'),
-    'base_url': model_config.get('base_url', 'http://192.168.0.127:8000/v1'),
-    'api_key': model_config.get('api_key', 'EMPTY'),
-    'temperature': model_config.get('temperature', 0.1),
-    'top_p': model_config.get('top_p', 0.95),
-    'streaming': model_config.get('streaming', True),
-}
+USE_STREAMING = model_config.get("streaming", True)
 
-# Only add model_provider if it's not empty, otherwise use default 'openai' for OpenAI-compatible APIs
-model_provider = model_config.get('model_provider', '').strip()
-if model_provider:
-    init_args['model_provider'] = model_provider
-else:
-    # Default to 'openai' if base_url looks like OpenAI-compatible API
-    init_args['model_provider'] = 'openai'
 
-# Save streaming setting for later use
-USE_STREAMING = init_args.get('streaming', True)
+def _get_delta_field(delta, name: str):
+    """Extract field from delta (e.g. reasoning_content, content)."""
+    if delta is None:
+        return None
+    val = getattr(delta, name, None)
+    if val is not None:
+        return val
+    if hasattr(delta, "model_extra") and delta.model_extra and name in delta.model_extra:
+        return delta.model_extra[name]
+    return None
 
-model = init_chat_model(**init_args)
+
+def _get_choice_field(choice, name: str):
+    """Extract field from stream choice (delta or message)."""
+    if choice is None:
+        return None
+    val = getattr(choice, name, None)
+    if val is not None:
+        return val
+    if hasattr(choice, "model_extra") and choice.model_extra and name in choice.model_extra:
+        return choice.model_extra[name]
+    return None
+
+
+THINK_OPEN = "<think>"
+THINK_CLOSE = "</think>"
+
+
+class _ThinkStreamParser:
+    """
+    流式解析 content：检测到 <think> 时，将后续输出作为推理部分记录，直到 </think>，
+    之后全部作为 content 记录。与 phenotype_to_disease_controller_dashscope_api 完全一致。
+    """
+    __slots__ = ("_state", "_buf")
+    STATE_BEFORE = "before_think"
+    STATE_IN_THINK = "in_think"
+    STATE_AFTER = "after_think"
+
+    def __init__(self):
+        self._state = self.STATE_BEFORE
+        self._buf = ""
+
+    def feed(self, chunk: str) -> List:
+        """喂入一段 content 文本，返回 [(type, data), ...]，type 为 "reasoning" 或 "content"。"""
+        if not chunk:
+            return []
+        self._buf += chunk
+        out = []
+        while self._buf:
+            if self._state == self.STATE_BEFORE:
+                i = self._buf.find(THINK_OPEN)
+                if i == -1:
+                    keep = len(THINK_OPEN) - 1
+                    if len(self._buf) > keep:
+                        emit = self._buf[:-keep] if keep else self._buf
+                        self._buf = self._buf[-keep:] if keep else self._buf
+                        if emit:
+                            out.append(("content", emit))
+                    break
+                if i > 0:
+                    out.append(("content", self._buf[:i]))
+                self._buf = self._buf[i + len(THINK_OPEN):]
+                self._state = self.STATE_IN_THINK
+            elif self._state == self.STATE_IN_THINK:
+                j = self._buf.find(THINK_CLOSE)
+                if j == -1:
+                    keep = len(THINK_CLOSE) - 1
+                    if len(self._buf) > keep:
+                        emit = self._buf[:-keep] if keep else self._buf
+                        self._buf = self._buf[-keep:] if keep else self._buf
+                        if emit:
+                            out.append(("reasoning", emit))
+                    break
+                out.append(("reasoning", self._buf[:j]))
+                self._buf = self._buf[j + len(THINK_CLOSE):]
+                self._state = self.STATE_AFTER
+            else:
+                out.append(("content", self._buf))
+                self._buf = ""
+                break
+        return out
+
+    def flush(self) -> List:
+        """将剩余 buffer 按当前状态输出（reasoning 或 content）。"""
+        out = []
+        if self._buf:
+            if self._state == self.STATE_IN_THINK:
+                out.append(("reasoning", self._buf))
+            else:
+                out.append(("content", self._buf))
+            self._buf = ""
+        self._state = self.STATE_AFTER
+        return out
+
+
+def _extract_think_from_content(content: str) -> tuple:
+    """当 reasoning_content 为空且 content 内含 <think>...</think> 时，提取 think 作为 reasoning，剩余作为 content。
+    返回 (reasoning_part, content_without_think)。若无可提取的 think，返回 ("", content)。与参考脚本一致。
+    """
+    if not content or not isinstance(content, str):
+        return ("", content or "")
+    m = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+    if not m:
+        return ("", content)
+    think_part = m.group(1).strip()
+    content_without = re.sub(r"<think>.*?</think>", "", content, count=1, flags=re.DOTALL).strip()
+    return (think_part, content_without)
+
+
+def _call_chat_sync(
+    messages: List[BaseMessage],
+    stream: bool,
+    on_chunk=None,
+) -> str:
+    """
+    Call model via OpenAI-compatible client (same as phenotype_to_disease_controller_dashscope_api):
+    client.chat.completions.create(..., extra_body={"enable_thinking": True}).
+    Returns the reply text (content only; <think> stripped when reasoning_content was not returned).
+    If stream=True and on_chunk is set, calls on_chunk(text) for each reasoning/content chunk.
+    """
+    model_name = model_config.get("model")
+    if not model_name:
+        raise ValueError("model_config.model is required.")
+    base_url = (model_config.get("base_url") or "").rstrip("/")
+    if not base_url:
+        raise ValueError("model_config.base_url is required.")
+    api_key = model_config.get("api_key", "EMPTY")
+    oai_messages = convert_to_openai_messages(messages)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+
+    if stream:
+        stream_obj = client.chat.completions.create(
+            model=model_name,
+            messages=oai_messages,
+            stream=True,
+            extra_body={"enable_thinking": True},
+        )
+        reasoning_parts = []
+        content_parts = []
+        has_reasoning_content = False
+        think_parser = _ThinkStreamParser()
+        for chunk in stream_obj:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = getattr(choice, "delta", None)
+            rc = _get_delta_field(delta, "reasoning_content") or _get_choice_field(choice, "reasoning_content")
+            if rc:
+                has_reasoning_content = True
+                reasoning_parts.append(rc)
+                if on_chunk:
+                    on_chunk(rc)
+            c = _get_delta_field(delta, "content") if delta else None
+            if not c:
+                c = _get_choice_field(choice, "content")
+            if c:
+                if has_reasoning_content:
+                    content_parts.append(c)
+                    if on_chunk:
+                        on_chunk(c)
+                else:
+                    for typ, data in think_parser.feed(c):
+                        if typ == "reasoning":
+                            reasoning_parts.append(data)
+                            if on_chunk:
+                                on_chunk(data)
+                        else:
+                            content_parts.append(data)
+                            if on_chunk:
+                                on_chunk(data)
+        if not has_reasoning_content:
+            for typ, data in think_parser.flush():
+                if typ == "reasoning":
+                    reasoning_parts.append(data)
+                    if on_chunk:
+                        on_chunk(data)
+                else:
+                    content_parts.append(data)
+                    if on_chunk:
+                        on_chunk(data)
+        content_full = "".join(content_parts)
+        if not has_reasoning_content and content_full:
+            _, content_full = _extract_think_from_content(content_full)
+        return content_full
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=oai_messages,
+        stream=False,
+        extra_body={"enable_thinking": True},
+    )
+    msg = response.choices[0].message if response.choices else None
+    if not msg:
+        return ""
+    content = getattr(msg, "content", None) or ""
+    rc = _get_choice_field(msg, "reasoning_content")
+    if not rc and content:
+        _, content = _extract_think_from_content(content)
+    return content
 
 def step_node(state: DiagnosisState) -> DiagnosisState:
     """Execute a single diagnosis step node"""
@@ -132,19 +311,12 @@ def step_node(state: DiagnosisState) -> DiagnosisState:
         # LangGraph automatically maintains messages history, no need for manual concatenation
         messages = state["messages"] + [HumanMessage(content=current_prompt)]
         
-        # Use streaming or non-streaming output based on configuration
-        if USE_STREAMING:
-            # Use streaming output
-            for chunk in model.stream(messages):
-                if hasattr(chunk, 'content') and chunk.content:
-                    current_step_output += chunk.content
-                    print(chunk.content, end='', flush=True)
-        else:
-            # Use non-streaming output
-            response = model.invoke(messages)
-            if hasattr(response, 'content') and response.content:
-                current_step_output = response.content
-                print(response.content, end='', flush=True)
+        # Call model via OpenAI client (same as phenotype_to_disease_controller_dashscope_api)
+        def _print_chunk(t):
+            print(t, end="", flush=True)
+        current_step_output = _call_chat_sync(messages, USE_STREAMING, on_chunk=_print_chunk if USE_STREAMING else None)
+        if not USE_STREAMING:
+            print(current_step_output, end="", flush=True)
         
         print(f"\n{'-' * 40}")
         print(f"✅ Step {current_step+1} completed. Output length: {len(current_step_output)}")
@@ -269,24 +441,16 @@ def case_analysis_step(case_state: CaseAnalysisState) -> CaseAnalysisState:
 
     # print(f"DEBUG: case_analysis_step: messages: {messages}")
     
-    # Execute case analysis with streaming or non-streaming output based on configuration
-    analysis_output = ""
+    # Call model via OpenAI client (same as phenotype_to_disease_controller_dashscope_api)
     print(f"\n📝 Case Analysis Response (New Dialog):")
     print("-" * 40)
-    
-    if USE_STREAMING:
-        # Use streaming output
-        for chunk in model.stream(messages):
-            if hasattr(chunk, 'content') and chunk.content:
-                analysis_output += chunk.content
-                print(chunk.content, end='', flush=True)
-    else:
-        # Use non-streaming output
-        response = model.invoke(messages)
-        if hasattr(response, 'content') and response.content:
-            analysis_output = response.content
-            print(response.content, end='', flush=True)
-    
+
+    def _print_chunk(t):
+        print(t, end="", flush=True)
+    analysis_output = _call_chat_sync(messages, USE_STREAMING, on_chunk=_print_chunk if USE_STREAMING else None)
+    if not USE_STREAMING:
+        print(analysis_output, end="", flush=True)
+
     print(f"\n{'-' * 40}")
     print(f"✅ Case analysis completed. Output length: {len(analysis_output)}")
     

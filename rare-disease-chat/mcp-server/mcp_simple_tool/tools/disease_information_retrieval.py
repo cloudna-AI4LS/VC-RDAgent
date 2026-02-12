@@ -12,8 +12,9 @@ import contextlib
 import io
 from typing import Dict, List, Any, Optional
 from mcp import types
-from langchain.chat_models import init_chat_model
+from openai import OpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages.utils import convert_to_openai_messages
 
 # Add parent directory to path to import top-level modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,28 +54,63 @@ BASE_DIR = os.path.dirname(__file__)
 config_file = os.path.join(os.path.dirname(BASE_DIR), 'scripts/rare_disease_diagnose/prompt_config_forKG.json')
 config = load_config(config_file)
 
-# Get model configuration from config file
+# Get model configuration from config file (same pattern as phenotype_to_disease_controller_dashscope_api)
 model_config = config.get('model_config', {})
 
-# Build init_chat_model arguments
-init_args = {
-    'model': model_config.get('model', 'Qwen/Qwen3-8B'),
-    'base_url': model_config.get('base_url', 'http://192.168.0.127:8000/v1'),
-    'api_key': model_config.get('api_key', 'EMPTY'),
-    'temperature': model_config.get('temperature', 0.0),
-    'top_p': model_config.get('top_p', 0.95),
-    'streaming': False,
-}
 
-# Only add model_provider if it's not empty, otherwise use default 'openai' for OpenAI-compatible APIs
-model_provider = model_config.get('model_provider', '').strip()
-if model_provider:
-    init_args['model_provider'] = model_provider
-else:
-    # Default to 'openai' if base_url looks like OpenAI-compatible API
-    init_args['model_provider'] = 'openai'
+def _get_choice_field(choice, name: str):
+    """Extract field from message (e.g. reasoning_content)."""
+    if choice is None:
+        return None
+    val = getattr(choice, name, None)
+    if val is not None:
+        return val
+    if hasattr(choice, "model_extra") and choice.model_extra and name in choice.model_extra:
+        return choice.model_extra[name]
+    return None
 
-model = init_chat_model(**init_args)
+
+def _extract_think_from_content(content: str) -> tuple:
+    """当 reasoning_content 为空且 content 内含 <think>...</think> 时，提取 think，剩余作为 content。返回 (reasoning_part, content_without_think)。"""
+    if not content or not isinstance(content, str):
+        return ("", content or "")
+    m = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+    if not m:
+        return ("", content)
+    think_part = m.group(1).strip()
+    content_without = re.sub(r"<think>.*?</think>", "", content, count=1, flags=re.DOTALL).strip()
+    return (think_part, content_without)
+
+
+def _call_chat_sync(messages: list) -> str:
+    """
+    Call model via OpenAI client (same as phenotype_to_disease_controller_dashscope_api):
+    client.chat.completions.create(..., extra_body={"enable_thinking": True}).
+    Returns reply text only (content; <think> stripped when reasoning_content was not returned).
+    """
+    model_name = model_config.get("model")
+    if not model_name:
+        raise ValueError("model_config.model is required.")
+    base_url = (model_config.get("base_url") or "").rstrip("/")
+    if not base_url:
+        raise ValueError("model_config.base_url is required.")
+    api_key = model_config.get("api_key", "EMPTY")
+    oai_messages = convert_to_openai_messages(messages)
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=oai_messages,
+        stream=False,
+        extra_body={"enable_thinking": False},
+    )
+    msg = response.choices[0].message if response.choices else None
+    if not msg:
+        return ""
+    content = getattr(msg, "content", None) or ""
+    rc = _get_choice_field(msg, "reasoning_content")
+    if not rc and content:
+        _, content = _extract_think_from_content(content)
+    return content
 
 def _extract_disease_names_with_model(text: str) -> List[str]:
     """Extract complete disease names from raw text using the same model
@@ -96,11 +132,7 @@ def _extract_disease_names_with_model(text: str) -> List[str]:
     ))
 
     try:
-        resp = model.invoke([system, user])
-        # print(f"DEBUG: resp: {resp}")
-        raw = getattr(resp, "content", "")
-        # Remove content inside <think> tags if present
-        raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+        raw = _call_chat_sync([system, user])
         raw = raw.strip()
         
         # print(f"DEBUG: raw: {raw}")

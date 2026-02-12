@@ -29,7 +29,7 @@ from phenotype_to_disease_controller_langchain_stream_api import (
     WorkflowAgent,
     EvaluationAgent,
     classify_task_type,
-    get_model,
+    synthesize_results,
 )
 
 logger = logging.getLogger("rdagent.web_ui_api_en")
@@ -98,6 +98,15 @@ def _tool_result_to_str(obj: Any) -> str:
     if isinstance(obj, (dict, list)):
         return json.dumps(obj, ensure_ascii=False, indent=2)
     return str(obj)
+
+
+def _should_yield_stream_chunk(phase: str, chunk_type: str) -> bool:
+    """Only yield content for synthesis phase so only final step shows in reply window."""
+    if chunk_type == "reasoning":
+        return True
+    if chunk_type == "content":
+        return phase == "synthesis"
+    return True
 
 
 def translate_workflow_status_en(status_msg: str) -> str:
@@ -211,7 +220,7 @@ async def controller_pipeline_stream_en(
             ) + "\n"
             return
 
-        # Phase 1: InfoExtractionAgent
+        # Phase 1: InfoExtractionAgent (stream reasoning/content to page via queue)
         yield json.dumps(
             {
                 "type": "status",
@@ -220,10 +229,40 @@ async def controller_pipeline_stream_en(
             }
         ) + "\n"
 
+        stream_queue: asyncio.Queue = asyncio.Queue()
+
+        def on_info_stream(chunk_type: str, data: str) -> None:
+            stream_queue.put_nowait(("info_extraction", chunk_type, data))
+
         info_extraction_agent = InfoExtractionAgent()
-        info_extraction_results = await info_extraction_agent.run(
-            user_query, conversation_messages
+        info_task = asyncio.create_task(
+            info_extraction_agent.run(
+                user_query, conversation_messages, stream_callback=on_info_stream
+            )
         )
+        while True:
+            try:
+                phase, ct, data = await asyncio.wait_for(stream_queue.get(), timeout=0.05)
+                if not _should_yield_stream_chunk(phase, ct):
+                    continue
+                yield json.dumps(
+                    {"type": ct, "data": data, "phase": phase}, ensure_ascii=False
+                ) + "\n"
+            except asyncio.TimeoutError:
+                if info_task.done():
+                    while not stream_queue.empty():
+                        try:
+                            phase, ct, data = stream_queue.get_nowait()
+                            if not _should_yield_stream_chunk(phase, ct):
+                                continue
+                            yield json.dumps(
+                                {"type": ct, "data": data, "phase": phase},
+                                ensure_ascii=False,
+                            ) + "\n"
+                        except asyncio.QueueEmpty:
+                            break
+                    break
+        info_extraction_results = await info_task
 
         for tool_name in info_extraction_results.keys():
             completed_tools.append(tool_name)
@@ -261,6 +300,7 @@ async def controller_pipeline_stream_en(
         workflow_status_messages: List[str] = []
         workflow_status_callback = WorkflowStatusCallback(workflow_status_messages)
         yielded_workflow_status: set = set()  # avoid duplicate status lines
+        workflow_stream_queue: asyncio.Queue = asyncio.Queue()
 
         def get_workflow_status_chunk(data: str) -> Optional[str]:
             key = ("workflow", data)
@@ -271,6 +311,9 @@ async def controller_pipeline_stream_en(
                 {"type": "status", "data": data, "phase": "workflow"},
             ) + "\n"
 
+        def on_workflow_stream(chunk_type: str, data: str) -> None:
+            workflow_stream_queue.put_nowait(("workflow", chunk_type, data))
+
         workflow_agent = WorkflowAgent()
         workflow_task = asyncio.create_task(
             workflow_agent.run(
@@ -278,11 +321,23 @@ async def controller_pipeline_stream_en(
                 tool_results=all_tool_results,
                 conversation_messages=conversation_messages,
                 status_callback=workflow_status_callback,
+                stream_callback=on_workflow_stream,
             )
         )
 
         last_status_count = 0
         while not workflow_task.done():
+            while not workflow_stream_queue.empty():
+                try:
+                    phase, ct, data = workflow_stream_queue.get_nowait()
+                    if not _should_yield_stream_chunk(phase, ct):
+                        continue
+                    yield json.dumps(
+                        {"type": ct, "data": data, "phase": phase},
+                        ensure_ascii=False,
+                    ) + "\n"
+                except asyncio.QueueEmpty:
+                    break
             if len(workflow_status_messages) > last_status_count:
                 for i in range(last_status_count, len(workflow_status_messages)):
                     chunk = get_workflow_status_chunk(workflow_status_messages[i])
@@ -292,6 +347,16 @@ async def controller_pipeline_stream_en(
 
             await asyncio.sleep(0.01)
 
+        while not workflow_stream_queue.empty():
+            try:
+                phase, ct, data = workflow_stream_queue.get_nowait()
+                if not _should_yield_stream_chunk(phase, ct):
+                    continue
+                yield json.dumps(
+                    {"type": ct, "data": data, "phase": phase}, ensure_ascii=False
+                ) + "\n"
+            except asyncio.QueueEmpty:
+                break
         if len(workflow_status_messages) > last_status_count:
             for i in range(last_status_count, len(workflow_status_messages)):
                 chunk = get_workflow_status_chunk(workflow_status_messages[i])
@@ -312,7 +377,34 @@ async def controller_pipeline_stream_en(
             ) + "\n"
 
             retry_agent = InfoExtractionAgent(specified_tools=missing_tools)
-            retry_results = await retry_agent.run(user_query, conversation_messages)
+            retry_task = asyncio.create_task(
+                retry_agent.run(
+                    user_query, conversation_messages, stream_callback=on_info_stream
+                )
+            )
+            while True:
+                try:
+                    phase, ct, data = await asyncio.wait_for(stream_queue.get(), timeout=0.05)
+                    if not _should_yield_stream_chunk(phase, ct):
+                        continue
+                    yield json.dumps(
+                        {"type": ct, "data": data, "phase": phase}, ensure_ascii=False
+                    ) + "\n"
+                except asyncio.TimeoutError:
+                    if retry_task.done():
+                        while not stream_queue.empty():
+                            try:
+                                phase, ct, data = stream_queue.get_nowait()
+                                if not _should_yield_stream_chunk(phase, ct):
+                                    continue
+                                yield json.dumps(
+                                    {"type": ct, "data": data, "phase": phase},
+                                    ensure_ascii=False,
+                                ) + "\n"
+                            except asyncio.QueueEmpty:
+                                break
+                        break
+            retry_results = await retry_task
 
             for tool_name, result in retry_results.items():
                 all_tool_results[tool_name] = result
@@ -357,10 +449,22 @@ async def controller_pipeline_stream_en(
                     tool_results=all_tool_results,
                     conversation_messages=conversation_messages,
                     status_callback=workflow_status_callback,
+                    stream_callback=on_workflow_stream,
                 )
             )
 
             while not workflow_task.done():
+                while not workflow_stream_queue.empty():
+                    try:
+                        phase, ct, data = workflow_stream_queue.get_nowait()
+                        if not _should_yield_stream_chunk(phase, ct):
+                            continue
+                        yield json.dumps(
+                            {"type": ct, "data": data, "phase": phase},
+                            ensure_ascii=False,
+                        ) + "\n"
+                    except asyncio.QueueEmpty:
+                        break
                 if len(workflow_status_messages) > last_status_count:
                     for i in range(last_status_count, len(workflow_status_messages)):
                         chunk = get_workflow_status_chunk(workflow_status_messages[i])
@@ -370,6 +474,17 @@ async def controller_pipeline_stream_en(
 
                 await asyncio.sleep(0.05)
 
+            while not workflow_stream_queue.empty():
+                try:
+                    phase, ct, data = workflow_stream_queue.get_nowait()
+                    if not _should_yield_stream_chunk(phase, ct):
+                        continue
+                    yield json.dumps(
+                        {"type": ct, "data": data, "phase": phase},
+                        ensure_ascii=False,
+                    ) + "\n"
+                except asyncio.QueueEmpty:
+                    break
             if len(workflow_status_messages) > last_status_count:
                 for i in range(last_status_count, len(workflow_status_messages)):
                     chunk = get_workflow_status_chunk(workflow_status_messages[i])
@@ -444,15 +559,48 @@ async def controller_pipeline_stream_en(
                 }
             ) + "\n"
 
+            eval_stream_queue: asyncio.Queue = asyncio.Queue()
+
+            def on_eval_stream(chunk_type: str, data: str) -> None:
+                eval_stream_queue.put_nowait(("evaluation", chunk_type, data))
+
             evaluation_agent = EvaluationAgent()
             workflow_result_for_eval = str(workflow_info.get("result", "") or "")
-            evaluation_results = await evaluation_agent.run(
-                user_query=user_query,
-                all_tool_results=all_tool_results,
-                conversation_messages=conversation_messages,
-                final_response=workflow_result_for_eval,
-                task_type=task_type,
+            eval_task = asyncio.create_task(
+                evaluation_agent.run(
+                    user_query=user_query,
+                    all_tool_results=all_tool_results,
+                    conversation_messages=conversation_messages,
+                    final_response=workflow_result_for_eval,
+                    task_type=task_type,
+                    stream_callback=on_eval_stream,
+                )
             )
+            while True:
+                try:
+                    phase, ct, data = await asyncio.wait_for(
+                        eval_stream_queue.get(), timeout=0.05
+                    )
+                    if not _should_yield_stream_chunk(phase, ct):
+                        continue
+                    yield json.dumps(
+                        {"type": ct, "data": data, "phase": phase}, ensure_ascii=False
+                    ) + "\n"
+                except asyncio.TimeoutError:
+                    if eval_task.done():
+                        while not eval_stream_queue.empty():
+                            try:
+                                phase, ct, data = eval_stream_queue.get_nowait()
+                                if not _should_yield_stream_chunk(phase, ct):
+                                    continue
+                                yield json.dumps(
+                                    {"type": ct, "data": data, "phase": phase},
+                                    ensure_ascii=False,
+                                ) + "\n"
+                            except asyncio.QueueEmpty:
+                                break
+                        break
+            evaluation_results = await eval_task
 
             evaluation_tool_results = evaluation_results.get("evaluation_tool_results") or {}
             for _name, _result in evaluation_tool_results.items():
@@ -507,263 +655,44 @@ async def controller_pipeline_stream_en(
             }
         ) + "\n"
 
-        model = await get_model("synthesizer")
+        synthesis_stream_queue: asyncio.Queue = asyncio.Queue()
 
-        results_text = "\n\n".join(
-            [
-                f"**{tool_name.upper()} Results:**\n{result}"
-                for tool_name, result in all_tool_results.items()
-            ]
+        def on_synthesis_stream(chunk_type: str, data: str) -> None:
+            synthesis_stream_queue.put_nowait(("synthesis", chunk_type, data))
+
+        synthesis_task = asyncio.create_task(
+            synthesize_results(
+                user_query=user_query,
+                tool_results=all_tool_results,
+                conversation_messages=conversation_messages,
+                stream_callback=on_synthesis_stream,
+            )
         )
-
-        synthesis_prompt = f"""You are a Medical Report Synthesizer.
-
-**Your Task:** Synthesize the results from multiple tools into a comprehensive, clear response.
-
-**User Query:** {user_query}
-
-**Tool Results:**
-{results_text}
-
-**Guidelines:**
-1. Integrate information from all tool results
-2. Present information clearly and logically
-3. Use tables or lists when appropriate
-4. Highlight key findings
-5. If results are inconsistent, note the discrepancies
-6. Provide a direct answer to the user's question
-7. Be concise but comprehensive
-
-**Generate a well-structured final response:**"""
-
-        if "disease_diagnosis_tool" in all_tool_results:
-            synthesis_prompt = f"""
-You are a Medical Report Synthesizer specialized in disease diagnosis.
-
-**Your Task:** Synthesize the results from multiple tools into a comprehensive, clear diagnostic report.
-
-**User Query:** {user_query}
-
-**Tool Results:**
-{results_text}
-
-**Required Output Format:**
-You MUST structure your response exactly according to the following sections:
-
-1. **Phenotype Analysis**
-   - Summarize the key phenotypes, symptoms, and clinical features from the user query and phenotype extraction tool results
-   - Present them in a clear, organized manner
-
-2. **Related Disease Case Analysis**
-   - Provide a highly summarized and synthesized overview of the disease cases from the disease case extraction tool results
-   - Do NOT analyze each disease case individually
-   - Instead, synthesize and summarize the key patterns, common features, and important insights across all extracted cases
-   - Focus on overall trends, shared characteristics, and high-level findings rather than case-by-case details
-
-3. **Top-5 Differential Diagnosis**
-   - Present the final top 5 differential diagnoses from the 'disease_diagnosis_tool' and 'diagnostic_evaluation' tool results
-    (in table markdown format):
-    | Disease Name | Matched Patient Phenotypes | Unmatched Patient Phenotypes | the Key Symptoms in the Disease but Not in the Patient | Matching Degree |
-    | --- | --- | --- | --- | --- |
-    | Disease Name 1 | Matched Patient Phenotypes | Unmatched Patient Phenotypes | the Key Symptoms in the Disease but Not in the Patient | Matching Degree |
-    | ... | ... | ... | ... | ... |
-    | Disease Name 5 | Matched Patient Phenotypes | Unmatched Patient Phenotypes | the Key Symptoms in the Disease but Not in the Patient | Matching Degree |
-   - Other important information for the top 5 differential diagnoses
-
-4. Other Differential Diagnoses
-   - Provide a list of other differential diagnoses from the 'disease_diagnosis_tool' results
-   - For each diagnosis, include:
-     - Diagnosis name
-     - Key matching features
-     - Other important information
-
-5. Additional Information
-   - Based on the information from the previous sections and your medical knowledge, provide additional relevant information, insights, or recommendations
-   - This may include:
-     - Additional diagnostic considerations or alternative perspectives
-     - Important clinical considerations, warnings, or precautions
-     - Recommended follow-up tests, examinations, or monitoring
-     - Treatment considerations or management suggestions (if appropriate)
-     - Limitations or uncertainties in the current diagnosis
-     - Any other relevant medical information that would be helpful for the user
-
-**Guidelines:**
-- Use clear section headers (## for main sections, ### for subsections)
-- Use tables or lists when appropriate for better readability
-- Highlight key findings and important information
-- Be concise but comprehensive
-- If results are inconsistent, note the discrepancies
-- Provide actionable insights when possible
-
-**Generate a well-structured diagnostic report following the format above:**"""
-
-        messages = [HumanMessage(content=synthesis_prompt)]
-        if conversation_messages:
-            messages = conversation_messages + messages
-
-        final_response_chunks: List[str] = []
-        accumulated_reasoning: List[str] = [] 
-        reasoning_buffer = ""
-        end_tag = "</think>"
-        end_tag_len = len(end_tag)
-        response_start_tag = "FINAL_RESPONSE"
-        response_start_tag_len = len(response_start_tag)
-        found_split_point = False
-
-        async for chunk in model.astream(messages):
-            if hasattr(chunk, "content") and chunk.content:
-                content = chunk.content
-
-                if not found_split_point:
-                    temp_content = reasoning_buffer + content
-                    reasoning_buffer = ""
-
-                    end_pos = temp_content.find(end_tag)
-                    if end_pos != -1:
-                        if end_pos > 0:
-                            reasoning_data = temp_content[:end_pos]
-                            accumulated_reasoning.append(reasoning_data)
-                            yield json.dumps(
-                                {
-                                    "type": "reasoning",
-                                    "data": reasoning_data,
-                                    "phase": "synthesis",
-                                }
-                            ) + "\n"
-
-                        remaining = temp_content[end_pos + end_tag_len :]
-                        remaining = remaining.replace(response_start_tag, "")
-                        if remaining:
-                            final_response_chunks.append(remaining)
-                            yield json.dumps(
-                                {
-                                    "type": "content",
-                                    "data": remaining,
-                                    "phase": "synthesis",
-                                }
-                            ) + "\n"
-
-                        found_split_point = True
-                        continue
-
-                    response_start_pos = temp_content.find(response_start_tag)
-                    if response_start_pos != -1:
-                        if response_start_pos > 0:
-                            reasoning_data = temp_content[:response_start_pos]
-                            accumulated_reasoning.append(reasoning_data)
-                            yield json.dumps(
-                                {
-                                    "type": "reasoning",
-                                    "data": reasoning_data,
-                                    "phase": "synthesis",
-                                }
-                            ) + "\n"
-
-                        remaining = temp_content[
-                            response_start_pos + response_start_tag_len :
-                        ]
-                        remaining = remaining.lstrip("\n\r\t ")
-                        remaining = remaining.replace(response_start_tag, "")
-                        if remaining:
-                            final_response_chunks.append(remaining)
-                            yield json.dumps(
-                                {
-                                    "type": "content",
-                                    "data": remaining,
-                                    "phase": "synthesis",
-                                }
-                            ) + "\n"
-
-                        found_split_point = True
-                        continue
-
-                    potential_tag = False
-                    if len(temp_content) >= end_tag_len - 1:
-                        for i in range(1, end_tag_len):
-                            suffix = temp_content[-i:]
-                            if end_tag.startswith(suffix):
-                                potential_tag = True
-                                reasoning_buffer = temp_content[-(end_tag_len - 1) :]
-                                output_reasoning = temp_content[: -(end_tag_len - 1)]
-                                if output_reasoning:
-                                    accumulated_reasoning.append(output_reasoning)
-                                    yield json.dumps(
-                                        {
-                                            "type": "reasoning",
-                                            "data": output_reasoning,
-                                            "phase": "synthesis",
-                                        }
-                                    ) + "\n"
-                                break
-
-                    if (
-                        not potential_tag
-                        and len(temp_content) >= response_start_tag_len - 1
-                    ):
-                        for i in range(1, response_start_tag_len):
-                            suffix = temp_content[-i:]
-                            if response_start_tag.startswith(suffix):
-                                potential_tag = True
-                                reasoning_buffer = temp_content[
-                                    -(response_start_tag_len - 1) :
-                                ]
-                                output_reasoning = temp_content[
-                                    : -(response_start_tag_len - 1)
-                                ]
-                                if output_reasoning:
-                                    accumulated_reasoning.append(output_reasoning)
-                                    yield json.dumps(
-                                        {
-                                            "type": "reasoning",
-                                            "data": output_reasoning,
-                                            "phase": "synthesis",
-                                        }
-                                    ) + "\n"
-                                break
-
-                    if not potential_tag and temp_content:
-                        accumulated_reasoning.append(temp_content)
-                        yield json.dumps(
-                            {
-                                "type": "reasoning",
-                                "data": temp_content,
-                                "phase": "synthesis",
-                            }
-                        ) + "\n"
-                else:
-                    filtered_content = content.replace(response_start_tag, "")
-                    if filtered_content:
-                        final_response_chunks.append(filtered_content)
-                        yield json.dumps(
-                            {
-                                "type": "content",
-                                "data": filtered_content,
-                                "phase": "synthesis",
-                            }
-                        ) + "\n"
-
-        if reasoning_buffer.strip() and not found_split_point:
-            accumulated_reasoning.append(reasoning_buffer)
-            yield json.dumps(
-                {
-                    "type": "reasoning",
-                    "data": reasoning_buffer,
-                    "phase": "synthesis",
-                }
-            ) + "\n"
-
-        final_response = "".join(final_response_chunks)
-        if not final_response.strip():
-            full_reasoning = "".join(accumulated_reasoning)
-            if full_reasoning.strip():
+        while True:
+            try:
+                phase, ct, data = await asyncio.wait_for(
+                    synthesis_stream_queue.get(), timeout=0.05
+                )
+                if not _should_yield_stream_chunk(phase, ct):
+                    continue
                 yield json.dumps(
-                    {
-                        "type": "content",
-                        "data": full_reasoning,
-                        "phase": "synthesis",
-                    },
-                    ensure_ascii=False,
+                    {"type": ct, "data": data, "phase": phase}, ensure_ascii=False
                 ) + "\n"
+            except asyncio.TimeoutError:
+                if synthesis_task.done():
+                    while not synthesis_stream_queue.empty():
+                        try:
+                            phase, ct, data = synthesis_stream_queue.get_nowait()
+                            if not _should_yield_stream_chunk(phase, ct):
+                                continue
+                            yield json.dumps(
+                                {"type": ct, "data": data, "phase": phase},
+                                ensure_ascii=False,
+                            ) + "\n"
+                        except asyncio.QueueEmpty:
+                            break
+                    break
+        await synthesis_task
 
         yield json.dumps(
             {

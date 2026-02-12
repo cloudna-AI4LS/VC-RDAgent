@@ -1,26 +1,16 @@
 #!/usr/bin/env python3
 """
-Autonomous Multi-Agent System with LangGraph
+Autonomous Multi-Agent System with LangGraph - DashScope API
 
-Architecture:
-1. 🤖 Info Extraction Agent: Autonomous agent using LangGraph for tool orchestration
-   - Automatic tool selection based on user input
-   - Multi-turn tool calling with state management
-   - Self-directed workflow
-2. 🎨 Synthesizer: Combines tool results into comprehensive final response
-3. 🔍 Evaluation Agent: Uses tools to verify and evaluate final response quality
-   - Same tools as Info Extraction Agent
-   - Validates completeness and accuracy
-   - Tool-based verification of key facts
-4. 📊 Result Analyzer: Determines if additional information is needed
+Same functionality as phenotype_to_disease_controller_langchain_stream_api.py,
+using LangChain/LangGraph (InfoExtractionAgent, WorkflowAgent, EvaluationAgent, etc.).
+Model calls use Alibaba DashScope API with reasoning_content (thinking) and content (reply) separated.
 
-Key Features:
-- LangGraph-based autonomous tool calling
-- State-managed multi-turn tool execution
-- Automatic tool routing
-- Tool-based response evaluation
-- Post-synthesis quality analysis
-- Conversation memory support
+Reference:
+  from openai import OpenAI
+  client = OpenAI(api_key=os.getenv("DASHSCOPE_API_KEY"), base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+  completion = client.chat.completions.create(model=config["model"], messages=..., extra_body={"enable_thinking": True}, stream=True)
+  # reasoning_content -> thinking, content -> full reply
 """
 import asyncio
 import os
@@ -29,14 +19,17 @@ import json
 import re
 from typing import TypedDict, Annotated, Sequence, Literal, Optional, Dict, Any, List, Union, Callable
 import requests
+from openai import AsyncOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, BaseMessage, AIMessage, ToolMessage, SystemMessage
-from pydantic import BaseModel, Field
+from langchain_core.messages.utils import convert_to_openai_messages
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
 
 from transformers import AutoTokenizer
+
 _tokenizer = AutoTokenizer.from_pretrained(
     "Qwen/Qwen3-8B",
     trust_remote_code=True
@@ -45,11 +38,11 @@ _tokenizer = AutoTokenizer.from_pretrained(
 # Global variables
 _models = {}
 
+# Single path: OpenAI-compatible streaming (_stream_dashscope_*); model/base_url from inference_config.json.
+
 # MCP HTTP endpoint
 MCP_ENDPOINT = os.environ.get("MCP_ENDPOINT", "http://localhost:3000/mcp/")
-# MCP request timeout in seconds (default: 600 seconds = 10 minutes)
 MCP_TIMEOUT = int(os.environ.get("MCP_TIMEOUT", "600"))
-# Placeholder for optional prompt generator (not available via MCP)
 generate_diagnosis_prompt = None
 
 
@@ -64,6 +57,442 @@ def _get_model_config_from_file() -> Optional[Dict[str, Any]]:
         return config.get("model_config", {})
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _get_delta_field(delta, name: str):
+    """Extract field from delta, supports extended fields like reasoning_content."""
+    if delta is None:
+        return None
+    val = getattr(delta, name, None)
+    if val is not None:
+        return val
+    if hasattr(delta, "model_extra") and delta.model_extra and name in delta.model_extra:
+        return delta.model_extra[name]
+    return None
+
+
+def _get_choice_field(choice, name: str):
+    """Extract field from stream choice (delta or top-level), for completeness of reasoning/content."""
+    if choice is None:
+        return None
+    val = getattr(choice, name, None)
+    if val is not None:
+        return val
+    if hasattr(choice, "model_extra") and choice.model_extra and name in choice.model_extra:
+        return choice.model_extra[name]
+    return None
+
+
+THINK_OPEN = "<think>"
+THINK_CLOSE = "</think>"
+
+
+class _ThinkStreamParser:
+    """
+    流式解析 content：检测到 <think> 时，将后续输出作为推理部分记录，直到 </think>，
+    之后全部作为 content 记录。支持标签被 chunk 截断的情况。
+    """
+    __slots__ = ("_state", "_buf")
+    STATE_BEFORE = "before_think"
+    STATE_IN_THINK = "in_think"
+    STATE_AFTER = "after_think"
+
+    def __init__(self):
+        self._state = self.STATE_BEFORE
+        self._buf = ""
+
+    def feed(self, chunk: str) -> List[tuple]:
+        """
+        喂入一段 content 文本，返回 [(type, data), ...]，type 为 "reasoning" 或 "content"，data 为对应片段。
+        """
+        if not chunk:
+            return []
+        self._buf += chunk
+        out = []
+        while self._buf:
+            if self._state == self.STATE_BEFORE:
+                i = self._buf.find(THINK_OPEN)
+                if i == -1:
+                    # 保留可能成为 <think> 前缀的尾部，避免跨 chunk 被截断
+                    keep = len(THINK_OPEN) - 1
+                    if len(self._buf) > keep:
+                        emit = self._buf[:-keep] if keep else self._buf
+                        self._buf = self._buf[-keep:] if keep else self._buf
+                        if emit:
+                            out.append(("content", emit))
+                    break
+                if i > 0:
+                    out.append(("content", self._buf[:i]))
+                self._buf = self._buf[i + len(THINK_OPEN):]
+                self._state = self.STATE_IN_THINK
+            elif self._state == self.STATE_IN_THINK:
+                j = self._buf.find(THINK_CLOSE)
+                if j == -1:
+                    keep = len(THINK_CLOSE) - 1
+                    if len(self._buf) > keep:
+                        emit = self._buf[:-keep] if keep else self._buf
+                        self._buf = self._buf[-keep:] if keep else self._buf
+                        if emit:
+                            out.append(("reasoning", emit))
+                    break
+                out.append(("reasoning", self._buf[:j]))
+                self._buf = self._buf[j + len(THINK_CLOSE):]
+                self._state = self.STATE_AFTER
+            else:  # STATE_AFTER
+                out.append(("content", self._buf))
+                self._buf = ""
+                break
+        return out
+
+    def flush(self) -> List[tuple]:
+        """将剩余 buffer 按当前状态输出（reasoning 或 content）。"""
+        out = []
+        if self._buf:
+            if self._state == self.STATE_IN_THINK:
+                out.append(("reasoning", self._buf))
+            else:
+                out.append(("content", self._buf))
+            self._buf = ""
+        self._state = self.STATE_AFTER
+        return out
+
+
+def _extract_think_from_content(content: str) -> tuple[str, str]:
+    """当 reasoning_content 为空且 content 内含 <think>...</think> 时，提取 think 作为 reasoning，剩余作为 content。
+    返回 (reasoning_part, content_without_think)。若无可提取的 think，返回 ("", content)。
+    """
+    if not content or not isinstance(content, str):
+        return ("", content or "")
+    m = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+    if not m:
+        return ("", content)
+    think_part = m.group(1).strip()
+    content_without = re.sub(r"<think>.*?</think>", "", content, count=1, flags=re.DOTALL).strip()
+    return (think_part, content_without)
+
+
+async def _stream_dashscope_with_tools(
+    messages: Sequence[BaseMessage],
+    tools: List,
+    agent_label: str = "Agent",
+    stream_callback: Optional[Callable[[str, str], None]] = None,
+) -> AIMessage:
+    """
+    DashScope API streaming (OpenAI-compatible client): real-time reasoning_content + content output.
+    Used by InfoExtractionAgent, EvaluationAgent, WorkflowAgent, PromptTemplateAgent.
+    If stream_callback is set, call stream_callback(chunk_type, data) for each "reasoning" or "content" chunk.
+    """
+    cfg = _get_model_config_from_file()
+    if not cfg:
+        raise ValueError("inference_config.json: missing model_config; set model, base_url, etc.")
+    model_name = cfg.get("model")
+    if not model_name:
+        raise ValueError("inference_config.json: model_config.model is required (model name must come from config only).")
+    api_key = cfg.get("api_key") or os.environ.get("DASHSCOPE_API_KEY", "EMPTY")
+    base_url = (cfg.get("base_url") or "").rstrip("/")
+    if not base_url:
+        raise ValueError("inference_config.json: model_config.base_url is required.")
+
+    oai_messages = convert_to_openai_messages(messages)
+    oai_tools = [convert_to_openai_tool(t) for t in tools]
+
+    reasoning_parts = []
+    content_parts = []
+    tool_calls_acc = {}
+    is_answering = False
+    think_parser = _ThinkStreamParser()
+    has_reasoning_content = False  # 仅当 API 未返回 reasoning_content 时才对 content 做 <think>/</think> 解析
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+    stream = await client.chat.completions.create(
+        model=model_name,
+        messages=oai_messages,
+        tools=oai_tools,
+        stream=True,
+        extra_body={"enable_thinking": True},
+    )
+
+    print("\n" + "=" * 60 + f" [{agent_label}] reasoning_content (stream) " + "=" * 60, flush=True)
+    last_chunk = None
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        last_chunk = chunk
+        choice = chunk.choices[0]
+        delta = getattr(choice, "delta", None)
+
+        rc = _get_delta_field(delta, "reasoning_content")
+        if not rc:
+            rc = _get_choice_field(choice, "reasoning_content")
+        if rc:
+            has_reasoning_content = True
+            reasoning_parts.append(rc)
+            if stream_callback:
+                stream_callback("reasoning", rc)
+            print(rc, end="", flush=True)
+
+        c = _get_delta_field(delta, "content") if delta else None
+        if not c:
+            c = _get_choice_field(choice, "content")
+        if c:
+            if not is_answering:
+                print("\n" + "=" * 20 + "Full reply" + "=" * 20 + f"\n    {agent_label}: ", end="", flush=True)
+                is_answering = True
+            if has_reasoning_content:
+                content_parts.append(c)
+                if stream_callback:
+                    stream_callback("content", c)
+                print(c, end="", flush=True)
+            else:
+                for typ, data in think_parser.feed(c):
+                    if typ == "reasoning":
+                        reasoning_parts.append(data)
+                        if stream_callback:
+                            stream_callback("reasoning", data)
+                        print(data, end="", flush=True)
+                    else:
+                        content_parts.append(data)
+                        if stream_callback:
+                            stream_callback("content", data)
+                        print(data, end="", flush=True)
+
+        for tc in (delta.tool_calls or []) if delta and hasattr(delta, "tool_calls") else []:
+            idx = getattr(tc, "index", 0)
+            if idx not in tool_calls_acc:
+                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+            acc = tool_calls_acc[idx]
+            if getattr(tc, "id", None):
+                acc["id"] = tc.id
+            fn = getattr(tc, "function", None)
+            if fn:
+                if getattr(fn, "name", None):
+                    acc["name"] = fn.name
+                if getattr(fn, "arguments", None):
+                    acc["arguments"] = acc.get("arguments", "") + fn.arguments
+
+    # 仅在未收到 reasoning_content 时刷新 think 解析器
+    if not has_reasoning_content:
+        for typ, data in think_parser.flush():
+            if typ == "reasoning":
+                reasoning_parts.append(data)
+                if stream_callback:
+                    stream_callback("reasoning", data)
+                print(data, end="", flush=True)
+            else:
+                content_parts.append(data)
+                if stream_callback:
+                    stream_callback("content", data)
+                print(data, end="", flush=True)
+
+    # Last chunk may carry reasoning/content in message or other fields (ensure no tail lost)
+    if last_chunk and last_chunk.choices:
+        msg = getattr(last_chunk.choices[0], "message", None)
+        if msg is not None:
+            tail_rc = _get_choice_field(msg, "reasoning_content")
+            if tail_rc and isinstance(tail_rc, str) and tail_rc.strip():
+                reasoning_parts.append(tail_rc)
+                if stream_callback:
+                    stream_callback("reasoning", tail_rc)
+                print(tail_rc, end="", flush=True)
+            elif not has_reasoning_content and not content_parts:
+                tail_content = getattr(msg, "content", None)
+                if tail_content and isinstance(tail_content, str) and tail_content.strip():
+                    for typ, data in think_parser.feed(tail_content):
+                        if typ == "reasoning":
+                            reasoning_parts.append(data)
+                            if stream_callback:
+                                stream_callback("reasoning", data)
+                            print(data, end="", flush=True)
+                        else:
+                            content_parts.append(data)
+                            if stream_callback:
+                                stream_callback("content", data)
+                            print(data, end="", flush=True)
+                    for typ, data in think_parser.flush():
+                        if typ == "reasoning":
+                            reasoning_parts.append(data)
+                            if stream_callback:
+                                stream_callback("reasoning", data)
+                            print(data, end="", flush=True)
+                        else:
+                            content_parts.append(data)
+                            if stream_callback:
+                                stream_callback("content", data)
+                            print(data, end="", flush=True)
+
+    if reasoning_parts or content_parts:
+        print(flush=True)
+    print("=" * 60 + " [End] " + "=" * 60 + "\n", flush=True)
+
+    reasoning_full = "".join(reasoning_parts)
+    content_full = "".join(content_parts)
+    # Fallback: 当 reasoning_content 为空但 content 内含 <think>...</think> 时，从 content 提取为 reasoning
+    if not reasoning_full and content_full:
+        think_part, content_without = _extract_think_from_content(content_full)
+        if think_part:
+            reasoning_full = think_part
+            content_full = content_without
+    tool_calls = []
+    for idx in sorted(tool_calls_acc.keys()):
+        acc = tool_calls_acc[idx]
+        args_str = acc.get("arguments") or "{}"
+        try:
+            args = json.loads(args_str) if args_str else {}
+        except json.JSONDecodeError:
+            args = {}
+        tool_calls.append({
+            "id": acc.get("id", ""),
+            "name": acc.get("name", ""),
+            "args": args,
+            "type": "tool_call",
+        })
+    return AIMessage(
+        content=content_full,
+        tool_calls=tool_calls,
+        additional_kwargs={"reasoning_content": reasoning_full} if reasoning_full else {},
+    )
+
+
+async def _stream_dashscope_no_tools(
+    messages: Sequence[BaseMessage],
+    agent_label: str = "Synthesis",
+    stream_callback: Optional[Callable[[str, str], None]] = None,
+) -> str:
+    """
+    DashScope API streaming (OpenAI-compatible client, no tools): real-time reasoning_content + content.
+    Used by synthesize_results. Returns concatenated content string.
+    If stream_callback is set, call stream_callback(chunk_type, data) for each "reasoning" or "content" chunk.
+    """
+    cfg = _get_model_config_from_file()
+    if not cfg:
+        raise ValueError("inference_config.json: missing model_config; set model, base_url, etc.")
+    model_name = cfg.get("model")
+    if not model_name:
+        raise ValueError("inference_config.json: model_config.model is required (model name must come from config only).")
+    api_key = cfg.get("api_key") or os.environ.get("DASHSCOPE_API_KEY", "EMPTY")
+    base_url = (cfg.get("base_url") or "").rstrip("/")
+    if not base_url:
+        raise ValueError("inference_config.json: model_config.base_url is required.")
+
+    oai_messages = convert_to_openai_messages(messages)
+
+    reasoning_parts = []
+    content_parts = []
+    is_answering = False
+    think_parser = _ThinkStreamParser()
+    has_reasoning_content = False  # 仅当 API 未返回 reasoning_content 时才对 content 做 <think>/</think> 解析
+
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+    stream = await client.chat.completions.create(
+        model=model_name,
+        messages=oai_messages,
+        stream=True,
+        extra_body={"enable_thinking": True},
+    )
+
+    print("\n" + "=" * 60 + f" [{agent_label}] reasoning_content (stream) " + "=" * 60, flush=True)
+    last_chunk = None
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        last_chunk = chunk
+        choice = chunk.choices[0]
+        delta = getattr(choice, "delta", None)
+
+        rc = _get_delta_field(delta, "reasoning_content")
+        if not rc:
+            rc = _get_choice_field(choice, "reasoning_content")
+        if rc:
+            has_reasoning_content = True
+            reasoning_parts.append(rc)
+            if stream_callback:
+                stream_callback("reasoning", rc)
+            print(rc, end="", flush=True)
+
+        c = _get_delta_field(delta, "content") if delta else None
+        if not c:
+            c = _get_choice_field(choice, "content")
+        if c:
+            if not is_answering:
+                print("\n" + "=" * 20 + "Full reply" + "=" * 20 + f"\n    {agent_label}: ", end="", flush=True)
+                is_answering = True
+            if has_reasoning_content:
+                content_parts.append(c)
+                if stream_callback:
+                    stream_callback("content", c)
+                print(c, end="", flush=True)
+            else:
+                for typ, data in think_parser.feed(c):
+                    if typ == "reasoning":
+                        reasoning_parts.append(data)
+                        if stream_callback:
+                            stream_callback("reasoning", data)
+                        print(data, end="", flush=True)
+                    else:
+                        content_parts.append(data)
+                        if stream_callback:
+                            stream_callback("content", data)
+                        print(data, end="", flush=True)
+
+    if not has_reasoning_content:
+        for typ, data in think_parser.flush():
+            if typ == "reasoning":
+                reasoning_parts.append(data)
+                if stream_callback:
+                    stream_callback("reasoning", data)
+                print(data, end="", flush=True)
+            else:
+                content_parts.append(data)
+                if stream_callback:
+                    stream_callback("content", data)
+                print(data, end="", flush=True)
+
+    if last_chunk and last_chunk.choices:
+        msg = getattr(last_chunk.choices[0], "message", None)
+        if msg is not None:
+            tail_rc = _get_choice_field(msg, "reasoning_content")
+            if tail_rc and isinstance(tail_rc, str) and tail_rc.strip():
+                reasoning_parts.append(tail_rc)
+                if stream_callback:
+                    stream_callback("reasoning", tail_rc)
+                print(tail_rc, end="", flush=True)
+            elif not has_reasoning_content and not content_parts:
+                tail_content = getattr(msg, "content", None)
+                if tail_content and isinstance(tail_content, str) and tail_content.strip():
+                    for typ, data in think_parser.feed(tail_content):
+                        if typ == "reasoning":
+                            reasoning_parts.append(data)
+                            if stream_callback:
+                                stream_callback("reasoning", data)
+                            print(data, end="", flush=True)
+                        else:
+                            content_parts.append(data)
+                            if stream_callback:
+                                stream_callback("content", data)
+                            print(data, end="", flush=True)
+                    for typ, data in think_parser.flush():
+                        if typ == "reasoning":
+                            reasoning_parts.append(data)
+                            if stream_callback:
+                                stream_callback("reasoning", data)
+                            print(data, end="", flush=True)
+                        else:
+                            content_parts.append(data)
+                            if stream_callback:
+                                stream_callback("content", data)
+                            print(data, end="", flush=True)
+
+    reasoning_full = "".join(reasoning_parts)
+    content_full = "".join(content_parts)
+    # Fallback: 当 reasoning_content 为空但 content 内含 <think>...</think> 时，从 content 提取；返回不含 think 的 content
+    if not reasoning_full and content_full:
+        think_part, content_without = _extract_think_from_content(content_full)
+        if think_part:
+            content_full = content_without
+    if reasoning_full or content_full:
+        print(flush=True)
+    print("=" * 60 + " [End] " + "=" * 60 + "\n", flush=True)
+    return content_full
 
 
 # Task type constants
@@ -108,22 +537,22 @@ def _call_mcp_tool(name: str, arguments: Dict[str, Any]) -> str:
         resp = requests.post(MCP_ENDPOINT, json=payload, headers=headers, timeout=MCP_TIMEOUT)
         resp.raise_for_status()
         
-        # 尝试解析响应：支持 JSON 和 SSE 两种格式
+        # Parse response: support both JSON and SSE formats
         data = None
         text = resp.text.strip()
         
-        # 方法1: 尝试直接解析为 JSON（--json-response 模式）
+        # Method 1: Try direct JSON parse (--json-response mode)
         try:
             data = resp.json()
         except (json.JSONDecodeError, ValueError):
-            # 方法2: 解析 SSE 格式（默认模式）
-            # SSE 格式: event: message\ndata: {...}
+            # Method 2: Parse SSE format (default mode)
+            # SSE format: event: message\ndata: {...}
             for line in text.split('\n'):
                 if line.startswith('data: '):
-                    json_str = line[6:]  # 去掉 'data: ' 前缀
+                    json_str = line[6:]  # strip 'data: ' prefix
                     try:
                         data = json.loads(json_str)
-                        break  # 取第一个有效的 JSON
+                        break  # take first valid JSON
                     except json.JSONDecodeError:
                         continue
         
@@ -294,25 +723,24 @@ async def get_model(
     **kwargs
 ):
     """
-    Get model instance. Parameters default to inference_config.json model_config.
+    Get model instance. When using DashScope API:
+    - base_url = https://dashscope.aliyuncs.com/compatible-mode/v1
+    - model_kwargs = {"extra_body": {"enable_thinking": True}}
+    - reasoning_content = thinking, content = full reply
     """
     global _models
     if name not in _models:
         file_cfg = _get_model_config_from_file() or {}
-        model_provider_val = (model_provider if model_provider is not None else file_cfg.get("model_provider", "") or "").strip()
         model_kwargs = {
-            "model": model if model is not None else file_cfg.get("model", "Qwen/Qwen3-8B"),
-            "base_url": base_url if base_url is not None else file_cfg.get("base_url", "http://192.168.0.127:8000/v1"),
-            "api_key": api_key if api_key is not None else file_cfg.get("api_key", "EMPTY"),
+            "model": model or file_cfg.get("model"),
+            "base_url": (base_url or file_cfg.get("base_url") or "").rstrip("/"),
+            "api_key": api_key or file_cfg.get("api_key", "EMPTY"),
             "temperature": temperature if temperature is not None else file_cfg.get("temperature", 0.1),
             "top_p": top_p if top_p is not None else file_cfg.get("top_p", 0.95),
             "streaming": streaming if streaming is not None else file_cfg.get("streaming", True),
+            "model_provider": "openai",
+            "extra_body": {"enable_thinking": True},
         }
-        if model_provider_val:
-            model_kwargs["model_provider"] = model_provider_val
-        else:
-            model_kwargs["model_provider"] = "openai"
-
         if reasoning_effort is not None:
             model_kwargs["reasoning_effort"] = reasoning_effort
         model_kwargs.update(kwargs)
@@ -326,7 +754,7 @@ def count_tokens(text: str) -> int:
 
     Notes:
     - Uses tokenizer vocab/encoding only; does not load or run the model.
-    - Based on the same tokenizer as the chat model (Qwen/Qwen3-8B).
+    - Tokenizer identity should match the chat model (model_config.model in inference_config.json).
     - Deterministic: add_special_tokens=False for raw token count.
     """
     if not text:
@@ -357,38 +785,15 @@ def count_messages_tokens(messages: List[BaseMessage]) -> int:
 # TASK CLASSIFICATION: Determine task type from user input
 # ============================================================================
 
-class TaskClassification(BaseModel):
-    """Task classification result."""
-    task_type: str = Field(description="The value of task type, without any index or description")
-
-
 async def classify_task_type(user_query: str, final_response: str, task_types: list = None) -> str:
-    """
-    Generic task type classifier: Determine task type from user query and final response using structured output
-    
-    Args:
-        user_query: User input query text
-        final_response: Final synthesized response
-        task_types: List of available task types with descriptions (defaults to TASK_TYPES global)
-        
-    Returns:
-        str: Classified task type
-    """
+    """Determine task type from user query and final response. Model must output valid JSON."""
     if task_types is None:
         task_types = TASK_TYPES
     
-    # Initialize model for task classification
     classification_model = await get_model("task_classification")
-    
-    # Use structured output to avoid JSON parsing issues
-    structured_model = classification_model.with_structured_output(TaskClassification)
-    
-    # Build task types description
     task_descriptions = json.dumps(task_types, ensure_ascii=False)
-    
-    # Build classification prompt
-    classification_prompt = f"""/no_think\n
-You are a task classification expert. Please analyze the user query and final response to determine the most appropriate task type.
+    classification_prompt = f"""/no_think
+You are a task classification expert. Analyze the user query and final response to determine the most appropriate task type.
 
 User Query: {user_query}
 
@@ -397,29 +802,50 @@ Final Response: {final_response}
 Available task types:
 {task_descriptions}
 
-Please classify the task type based on the user query and the content of the final response.
-"""
+You MUST respond with a valid JSON object in exactly this format, no other text:
+{{"task_type": "<one of the task_type values from the list above>"}}
+
+Example: {{"task_type": "disease_diagnosis"}}"""
     
     try:
-        # Call model for classification with structured output
-        # For structured output, we need to accumulate all chunks first
-        full_result = None
-        async for chunk in structured_model.astream([HumanMessage(content=classification_prompt)]):
-            full_result = chunk
+        response_chunks = []
+        async for chunk in classification_model.astream([HumanMessage(content=classification_prompt)]):
+            if hasattr(chunk, 'content') and chunk.content:
+                response_chunks.append(chunk.content)
+        result_text = "".join(response_chunks).strip()
         
-        if full_result is None:
+        if not result_text:
             return task_types[0]["task_type"]
         
-        # Extract task_type from structured result
-        classified_type = full_result.task_type if hasattr(full_result, 'task_type') else task_types[0]["task_type"]
+        # Extract JSON: support markdown code block wrapper
+        json_str = result_text
+        if "```" in result_text:
+            for block in result_text.split("```"):
+                block = block.strip()
+                if block.startswith("json"):
+                    block = block[4:].strip()
+                if block.startswith("{"):
+                    json_str = block
+                    break
+        elif "{" in result_text and "}" in result_text:
+            start = result_text.find("{")
+            end = result_text.rfind("}") + 1
+            json_str = result_text[start:end]
         
-        # Validate that the classified type is in our available task types
-        available_types = [task['task_type'] for task in task_types]
-        if classified_type not in available_types:
-            print(f"Warning: Classified task type '{classified_type}' not in available types, using default")
-            return task_types[0]["task_type"]
-            
-        return classified_type
+        data = json.loads(json_str)
+        classified_type = data.get("task_type", "")
+        if not isinstance(classified_type, str):
+            classified_type = str(classified_type)
+        
+        available_types = [t["task_type"] for t in task_types]
+        if classified_type in available_types:
+            return classified_type
+        # If parsed value not in list, try fuzzy match
+        ct_lower = classified_type.lower()
+        for tt in available_types:
+            if tt in ct_lower or ct_lower == tt:
+                return tt
+        return task_types[0]["task_type"]
             
     except Exception as e:
         print(f"Task classification error: {e}")
@@ -472,17 +898,14 @@ class InfoExtractionAgent:
         if self.model is None:
             self.model = await get_model(
                 name="info_extraction_agent",
-                reasoning_effort="low"  # 可选: "low", "medium", "high"
+                reasoning_effort="low"  # optional: "low", "medium", "high"
             )
         return self.model
     
     async def _call_model(self, state: MessagesState):
         """Call the model with tools (with streaming)"""
-        model = await self._get_model()
-        model_with_tools = model.bind_tools(self.tools)
-        
         messages = state["messages"]
-        # TODO: 去除messages中AIMessage的思考部分
+        # TODO: strip thinking from AIMessage in messages
         for i in range(len(messages)):
             if isinstance(messages[i], AIMessage):
                 messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content, flags=re.DOTALL)
@@ -525,38 +948,17 @@ Task target: My task is to call the appropriate tools to parse the user query or
         
         # print(f"DEBUG: Messages: {messages}")
         
-        # Stream the response and accumulate chunks
-        response_chunks = []
-        has_content = False
-        
-        async for chunk in model_with_tools.astream(messages):
-            response_chunks.append(chunk)
-            # If it's a content chunk, print it in real-time
-            if hasattr(chunk, 'content') and chunk.content:
-                if not has_content:
-                    print("    Agent: ", end='', flush=True)
-                    has_content = True
-                print(chunk.content, end='', flush=True)
-        
-        # Print newline after streaming completes if we had any content
-        if has_content:
-            print()
-        
-        # Reconstruct the complete response message by merging chunks
-        if response_chunks:
-            response = response_chunks[0]
-            for chunk in response_chunks[1:]:
-                response = response + chunk
-        else:
-            response = AIMessage(content="")
-        
+        response = await _stream_dashscope_with_tools(
+            messages, self.tools, agent_label="InfoExtractionAgent",
+            stream_callback=getattr(self, "stream_callback", None),
+        )
         return {"messages": [response]}
     
     def _should_continue(self, state: MessagesState) -> str:
         """Determine if should continue to tools or end"""
         messages = state["messages"]
         last_message = messages[-1]
-        
+
         # If the last message is from AI and has tool calls, go to tools
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             print(f"  🤖 Last message is a tool call: {last_message.tool_calls}")
@@ -585,17 +987,19 @@ Task target: My task is to call the appropriate tools to parse the user query or
         
         return self.graph
     
-    async def run(self, user_query: str, conversation_messages: List[BaseMessage] = None) -> Dict[str, str]:
+    async def run(self, user_query: str, conversation_messages: List[BaseMessage] = None, stream_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, str]:
         """
         Run the info extraction agent to automatically select and execute tools
         
         Args:
             user_query: User's query
             conversation_messages: Conversation history
+            stream_callback: Optional callback(chunk_type, data) for real-time reasoning/content chunks.
             
         Returns:
             Dict mapping tool names to their results
         """
+        self.stream_callback = stream_callback
         print("\n" + "="*80)
         print("🤖 INFO EXTRACTION AGENT: Autonomous Tool Selection & Execution")
         print("="*80)
@@ -748,46 +1152,18 @@ class EvaluationAgent:
     
     async def _call_model(self, state: MessagesState):
         """Call the model with tools for evaluation (with streaming)"""
-        model = await get_model("evaluation_agent")
-        model_with_tools = model.bind_tools(self.tools)
-        
         messages = state["messages"]
 
-        # 判断是否是第一次调用：检查最后一条消息的类型
-        # 第一次：最后一条是 HumanMessage
-        # 后续：最后一条是 ToolMessage（从 tools 节点返回）
+        # Check if first call: last message type
         last_message = messages[-1] if messages else None
         is_first_call = isinstance(last_message, HumanMessage)
-        
-        # 第一次用 /no_think，后续用 /think
         sys_msg_content = "/no_think" if is_first_call else "/think"
         messages = [SystemMessage(content=sys_msg_content)] + messages
 
-        # Stream the response and accumulate chunks
-        response_chunks = []
-        has_content = False
-        
-        async for chunk in model_with_tools.astream(messages):
-            response_chunks.append(chunk)
-            # If it's a content chunk, print it in real-time
-            if hasattr(chunk, 'content') and chunk.content:
-                if not has_content:
-                    print("    Evaluation Agent: ", end='', flush=True)
-                    has_content = True
-                print(chunk.content, end='', flush=True)
-        
-        # Print newline after streaming completes if we had any content
-        if has_content:
-            print()
-        
-        # Reconstruct the complete response message by merging chunks
-        if response_chunks:
-            response = response_chunks[0]
-            for chunk in response_chunks[1:]:
-                response = response + chunk
-        else:
-            response = AIMessage(content="")
-        
+        response = await _stream_dashscope_with_tools(
+            messages, self.tools, agent_label="EvaluationAgent",
+            stream_callback=getattr(self, "stream_callback", None),
+        )
         return {"messages": [response]}
     
     def _should_continue(self, state: MessagesState) -> str:
@@ -875,7 +1251,7 @@ class EvaluationAgent:
     
     async def run(self, user_query: str, all_tool_results: Dict[str, str], 
                   conversation_messages: List[BaseMessage], final_response: str,
-                  task_type: str = TASK_TYPE_GENERAL_INQUIRY) -> Dict[str, Any]:
+                  task_type: str = TASK_TYPE_GENERAL_INQUIRY, stream_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:
         """
         Run the evaluation agent to assess final response quality
         
@@ -885,12 +1261,14 @@ class EvaluationAgent:
             conversation_messages: Conversation history
             final_response: The final synthesized response to evaluate
             task_type: Type of task for selecting appropriate evaluation template
+            stream_callback: Optional callback(chunk_type, data) for real-time reasoning/content chunks.
             
         Returns:
             Dict with evaluation results including:
             - evaluation_tool_results: Results from evaluation tools (for reference data)
             - evaluation_response: Model's final evaluation output (the actual evaluation)
         """
+        self.stream_callback = stream_callback
         print("\n" + "="*80)
         print(f"🔍 EVALUATION AGENT: Assessing Response Quality (Task: {task_type})")
         print("="*80)
@@ -1012,52 +1390,23 @@ class WorkflowAgent:
         self.tool_results = {}
         self.user_query = ""
         self.model_with_tools = None
-        self.status_callback = None  # 存储状态回调函数
+        self.status_callback = None  # status callback
     
     async def _call_model(self, state: MessagesState):
         """LLM decides whether to call tool (with streaming)"""
-        # Stream the response and accumulate chunks
-        response_chunks = []
-        has_content = False
-        status_sent = False  # 标记是否已发送状态
-        
-        async for chunk in self.model_with_tools.astream(state["messages"]):
-            response_chunks.append(chunk)
-            
-            # 在流式过程中检查是否有 tool_calls，一旦检测到立即发送状态
-            if not status_sent and hasattr(chunk, 'tool_calls') and chunk.tool_calls:
-                status_sent = True
-                if self.status_callback:
-                    # 先发送"已完成评估诊断需求"
-                    self.status_callback("Completed evaluation")
-                    # 然后发送"正在进行XXX"
-                    tool_name = chunk.tool_calls[0].get('name', 'workflow tool')
-                    self.status_callback(f"Executing {tool_name}...")
-            
-            # If it's a content chunk, print it in real-time
-            if hasattr(chunk, 'content') and chunk.content:
-                if not has_content:
-                    print("    Workflow Agent: ", end='', flush=True)
-                    has_content = True
-                print(chunk.content, end='', flush=True)
-        
-        # Print newline after streaming completes if we had any content
-        if has_content:
-            print()
-        
-        # Reconstruct the complete response message by merging chunks
-        if response_chunks:
-            response = response_chunks[0]
-            for chunk in response_chunks[1:]:
-                response = response + chunk
-        else:
-            response = AIMessage(content="")
-        
-        # 如果流式过程中没有检测到 tool_calls，在合并后再次检查（作为备用）
+        messages = state["messages"]
+        status_sent = False
+
+        response = await _stream_dashscope_with_tools(
+            messages, self.workflow_tools, agent_label="WorkflowAgent",
+            stream_callback=getattr(self, "stream_callback", None),
+        )
+
+        # Fallback: send status_callback when response has tool_calls (e.g. not sent during stream)
         if not status_sent and self.status_callback and hasattr(response, 'tool_calls') and response.tool_calls:
-            # 先发送"已完成评估诊断需求"
+            # Send "Completed evaluation"
             self.status_callback("Completed evaluation")
-            # 然后发送"正在进行XXX"
+            # Then send "Executing XXX"
             tool_name = response.tool_calls[0].get('name', 'workflow tool')
             self.status_callback(f"Executing {tool_name}...")
         
@@ -1068,11 +1417,11 @@ class WorkflowAgent:
         last = state["messages"][-1]
         if hasattr(last, 'tool_calls') and last.tool_calls:
             print(f"    🔧 Routing to execute: {len(last.tool_calls)} tool call(s) detected")
-            # 如果 _call_model 中没有发送状态（可能 tool_calls 在合并后才出现），这里作为备用
+            # Fallback if _call_model did not send status (tool_calls may appear only after merge)
             if self.status_callback and last.tool_calls:
-                # 先发送"已完成评估诊断需求"
+                # Send "Completed evaluation"
                 self.status_callback("Completed evaluation")
-                # 然后发送"正在进行XXX"
+                # Then send "Executing XXX"
                 tool_name = last.tool_calls[0].get('name', 'workflow tool')
                 self.status_callback(f"Executing {tool_name}...")
             return "execute"
@@ -1116,19 +1465,18 @@ class WorkflowAgent:
                     except json.JSONDecodeError:
                         case_result = {}
                 
-                # 实现下面的功能：如果上述必须的参数结果是空，直接返回提示信息,要能从中获取工具名称，结束该agent，
-                # 然后在控制中心获取反馈，然后，在控制中心调用指定工具的InfoExtractionAgent获取对应的信息，
-                # 然后，再重新调用该agent执行
+                # If required params are empty: return prompt with tool names, end agent.
+                # Controller gets feedback, calls InfoExtractionAgent for missing tools, then retries.
                 # if not phenotype_result or not case_result:
                 if not case_result:
-                    # 确定缺失的工具
+                    # Determine missing tools
                     missing_tools = []
                     # if not phenotype_result:
                     #     missing_tools.append('phenotype_extractor_tool')
                     if not case_result:
                         missing_tools.append('disease_case_extractor_tool')
                     
-                    # 返回特殊标记的错误消息，包含缺失的工具信息
+                    # Return error with missing tool info
                     error_message = json.dumps({
                         "status": "MISSING_REQUIRED_TOOLS",
                         "missing_tools": missing_tools,
@@ -1141,15 +1489,14 @@ class WorkflowAgent:
                     ))
                     break
                 
-                # 找到phenotype_result和case_result中共同的表型id键
-                # phenotype_result和case_result都是以表型id字符串为键的字典
+                # Find common phenotype id keys in phenotype_result and case_result (dicts keyed by id)
                 # symptom_sets_in_extracted_phenotypes = set(phenotype_result.keys()) if isinstance(phenotype_result, dict) else set()
                 symptom_sets_in_extracted_cases = set(case_result.keys()) if isinstance(case_result, dict) else set()
                 # common_ids = symptom_sets_in_extracted_phenotypes & symptom_sets_in_extracted_cases
                 common_ids = symptom_sets_in_extracted_cases
                 
                 if not common_ids:
-                    # 如果没有共同的症状集，返回错误信息
+                    # If no common phenotype set, return error
                     error_message = json.dumps({
                         "status": "NO_COMMON_PHENOTYPE_IDS",
                         "message": "No common symptom sets found between phenotype_result and case_result",
@@ -1161,15 +1508,15 @@ class WorkflowAgent:
                     ))
                     break
                 
-                # 对每个共同的id，提取对应的值并执行workflow
+                # For each common id, extract values and run workflow
                 tool_func = next((t for t in self.workflow_tools if t.name == tool_name), None)
                 
                 if tool_func:
-                    # 创建一个字典来存储每个id_key对应的result
+                    # Dict to store result per id_key
                     results_by_id = {}
                     
                     for id_key in common_ids:
-                        # 为每个id创建独立的args副本
+                        # Independent args copy per id
                         id_args = args.copy()
                         # id_args['extracted_phenotypes'] = phenotype_result[id_key]
                         id_args['extracted_phenotypes'] = case_result[id_key]['extracted_phenotypes']
@@ -1180,15 +1527,15 @@ class WorkflowAgent:
                         
                         try:
                             result = tool_func.invoke(id_args)
-                            # 将result存储到字典中，键为id_key
+                            # Store result in dict by id_key
                             results_by_id[id_key] = result
                             print(f"  ✓ Executed: {tool_name} for phenotype ID: {id_key}")
                         except Exception as e:
-                            # 错误信息也存储到字典中
+                            # Store error in dict too
                             results_by_id[id_key] = {"error": str(e)}
                             print(f"  ❌ Error for phenotype ID {id_key}: {e}")
                     
-                    # 将按id_key组织的结果添加到outputs
+                    # Add results organized by id_key to outputs
                     outputs.append(ToolMessage(
                         content=json.dumps(results_by_id, ensure_ascii=False, default=str),
                         name=tool_name,
@@ -1201,7 +1548,7 @@ class WorkflowAgent:
                         tool_call_id=tool_call['id']
                     ))
             else:
-                # 对于非disease_diagnosis_tool的工具，保持原有逻辑
+                # For non-disease_diagnosis_tool, keep original logic
                 # Find and execute tool
                 tool_func = next((t for t in self.workflow_tools if t.name == tool_name), None)
                 
@@ -1218,7 +1565,7 @@ class WorkflowAgent:
         
         return {"messages": outputs}
     
-    async def run(self, user_query: str, tool_results: Dict[str, Any] = None, conversation_messages: List[BaseMessage] = None, status_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    async def run(self, user_query: str, tool_results: Dict[str, Any] = None, conversation_messages: List[BaseMessage] = None, status_callback: Optional[Callable[[str], None]] = None, stream_callback: Optional[Callable[[str, str], None]] = None) -> Dict[str, Any]:
         """
         LLM decides whether to call workflow, execute if needed
         
@@ -1227,6 +1574,7 @@ class WorkflowAgent:
             tool_results: Results from previous tool calls
             conversation_messages: Conversation history
             status_callback: Optional callback function(status_message: str) to notify status changes
+            stream_callback: Optional callback(chunk_type, data) for real-time reasoning/content chunks.
         """
         print("\n" + "="*80)
         print("🔄 WORKFLOW AGENT")
@@ -1234,8 +1582,9 @@ class WorkflowAgent:
         
         self.tool_results = tool_results or {}
         self.user_query = user_query
-        self.status_callback = status_callback  # 存储回调函数
-        # 来自上一阶段（Info Extraction Agent）的工具结果，执行 disease_diagnosis_tool 时会注入
+        self.status_callback = status_callback
+        self.stream_callback = stream_callback
+        # Tool results from Info Extraction Agent, injected when running disease_diagnosis_tool
         print(f"📊 Tool results from previous phase (for injection): {list(self.tool_results.keys())}")
         
         # Get model with tools
@@ -1280,39 +1629,39 @@ Available workflows:
         workflow_name = None
         workflow_result = None
         missing_tools = None
-        tool_call_detected = False  # 标记是否检测到工具调用
+        tool_call_detected = False
         
         async for chunk in app.astream({"messages": messages}):
             for node, output in chunk.items():
-                # 检测工具调用（状态回调已在 _call_model 和 _route 中处理）
+                # Detect tool call (status callback in _call_model and _route)
                 if node == "agent" and output and "messages" in output:
                     for msg in output["messages"]:
                         if hasattr(msg, 'tool_calls') and msg.tool_calls:
                             tool_call_detected = True
                             break
                 
-                # 检测工具执行完成
+                # Detect tool execution complete
                 if output and "messages" in output:
                     for msg in output["messages"]:
                         if hasattr(msg, 'type') and msg.type == 'tool':
                             workflow_name = msg.name
                             workflow_result = msg.content
                             
-                            # 工具执行完成，发送完成状态
+                            # Tool done, send status
                             if self.status_callback and workflow_name:
                                 self.status_callback(f"Completed {workflow_name}")
                             
-                            # 检测是否有缺失的工具
+                            # Check for missing tools
                             try:
                                 result_data = json.loads(workflow_result)
                                 if isinstance(result_data, dict) and result_data.get('status') == 'MISSING_REQUIRED_TOOLS':
                                     missing_tools = result_data.get('missing_tools', [])
                             except (json.JSONDecodeError, TypeError):
-                                pass  # 不是JSON格式，正常处理
+                                pass  # not JSON, skip
         
         elapsed = time.time() - start
         
-        # 如果没有检测到工具调用，通过回调通知外部
+        # If no tool call, notify via callback
         if not tool_call_detected and self.status_callback:
             self.status_callback("No workflow tool needed")
         
@@ -1380,32 +1729,9 @@ class PromptTemplateAgent:
         # Define the function that calls the model (with streaming)
         async def call_model(state: State):
             messages = state['messages']
-            
-            # Stream the response and accumulate chunks
-            response_chunks = []
-            has_content = False
-            
-            async for chunk in model_with_tools.astream(messages):
-                response_chunks.append(chunk)
-                # If it's a content chunk, print it in real-time
-                if hasattr(chunk, 'content') and chunk.content:
-                    if not has_content:
-                        print("    Template Agent: ", end='', flush=True)
-                        has_content = True
-                    print(chunk.content, end='', flush=True)
-            
-            # Print newline after streaming completes if we had any content
-            if has_content:
-                print()
-            
-            # Reconstruct the complete response message by merging chunks
-            if response_chunks:
-                response = response_chunks[0]
-                for chunk in response_chunks[1:]:
-                    response = response + chunk
-            else:
-                response = AIMessage(content="")
-            
+            response = await _stream_dashscope_with_tools(
+                list(messages), self.prompt_tools, agent_label="PromptTemplateAgent",
+            )
             return {"messages": [response]}
         
         # Build the graph
@@ -1483,9 +1809,15 @@ Select the template that best matches the user's needs and call the correspondin
 # SYNTHESIZER: Combine results and generate response
 # ============================================================================
 
-async def synthesize_results(user_query: str, tool_results: Dict[str, str], conversation_messages: List[BaseMessage] = None) -> str:
+async def synthesize_results(
+    user_query: str,
+    tool_results: Dict[str, str],
+    conversation_messages: List[BaseMessage] = None,
+    stream_callback: Optional[Callable[[str, str], None]] = None,
+) -> str:
     """
-    Phase 3: Synthesize tool results into final response
+    Phase 3: Synthesize tool results into final response.
+    If stream_callback is set, call stream_callback(chunk_type, data) for each "reasoning" or "content" chunk.
     """
     print("\n" + "="*80)
     print("🎨 PHASE 3: SYNTHESIS")
@@ -1493,8 +1825,6 @@ async def synthesize_results(user_query: str, tool_results: Dict[str, str], conv
     
     # print(f"Tool Results: {tool_results}")
 
-    model = await get_model("synthesizer")
-    
     # Build context from tool results
     results_text = "\n\n".join([
         f"**{tool_name.upper()} Results:**\n{result}"
@@ -1585,20 +1915,13 @@ You MUST structure your response exactly according to the following sections:
     messages = [HumanMessage(content=synthesis_prompt)]
     if conversation_messages:
         messages = conversation_messages + messages
-    
-    # Stream the synthesis
-    response_chunks = []
+
     print("\n📋 Final Response:")
     print("-" * 80)
-    
-    async for chunk in model.astream(messages):
-        if hasattr(chunk, 'content') and chunk.content:
-            print(chunk.content, end='', flush=True)
-            response_chunks.append(chunk.content)
-    
+    final_response = await _stream_dashscope_no_tools(
+        messages, agent_label="Synthesis", stream_callback=stream_callback
+    )
     print("\n" + "-" * 80)
-    
-    final_response = ''.join(response_chunks)
     return final_response
 
 
@@ -1727,7 +2050,7 @@ async def main():
     """Main interactive loop"""
     
     print("=" * 80)
-    print("🤖 Autonomous Multi-Agent System with LangGraph")
+    print("🤖 Autonomous Multi-Agent System with LangGraph (DashScope)")
     print("=" * 80)
     print("Architecture:")
     print("  1. 🤖 Info Extraction Agent: Autonomous agent that automatically selects and calls tools")
@@ -1738,15 +2061,8 @@ async def main():
     print("Key Features:")
     print("  ✓ Autonomous tool selection (LangGraph-based)")
     print("  ✓ Multi-turn tool calling with state management")
-    print("  ✓ Automatic tool routing based on model's understanding")
+    print("  ✓ DashScope API with enable_thinking (reasoning_content + content)")
     print("  ✓ Tool-based response evaluation and verification")
-    print("  ✓ Post-synthesis quality analysis")
-    print("  ✓ 🧠 Conversation memory - remembers previous interactions")
-    print()
-    print("Available Tools:")
-    print("  • phenotype_extractor_tool: Extract phenotype, symptom, HPO IDs from input")
-    print("  • disease_case_extractor_tool: Extract phenotypes and generate disease cases")
-    print("  • disease_information_retrieval_tool: Extract and normalize disease names with details")
     print()
     print("Commands:")
     print("  'quit' - exit")
@@ -1805,4 +2121,3 @@ def interactive_chat():
 
 if __name__ == "__main__":
     interactive_chat()
-

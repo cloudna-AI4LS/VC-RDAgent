@@ -223,8 +223,6 @@ def _run_pipeline_process(
     """
     import asyncio
 
-    from phenotype_to_disease_controller_langchain_stream_api import AIMessage, BaseMessage, HumanMessage
-
     def _deserialize_messages(data: List[Dict[str, Any]]) -> List[BaseMessage]:
         result = []
         for d in data:
