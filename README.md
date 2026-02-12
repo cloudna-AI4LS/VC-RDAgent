@@ -1,9 +1,9 @@
-<h1 align="center">VC-RDAgent</h1>
+<h1 align="center">VC-RDAgent: An efficient rare disease diagnosis agent via virtual case construction informed by hybrid statistical-metric and hyperbolic-semantic prioritization</h1>
 
 <p align="center">
-  <a href="https://doi.org/10.64898/2026.02.09.702153">Paper</a>
+  <a href="https://doi.org/10.64898/2026.02.09.702153">📄 Paper</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/cloudna-AI4LS/VC-RDAgent/tree/main/rare-disease-chat">Demo</a>
+  <a href="https://rarellm.app.bio-it.tech/rdagent/">▶️ Demo</a>
 </p>
 
 A Virtual Case (VC) augmented reasoning framework for robust and privacy-preserving rare disease diagnosis. VC synthesizes *virtual standardized cases* from knowledge bases (HPO, Orphanet, OMIM, MONDO) instead of real clinical records, enabling privacy-conscious, evidence-grounded diagnostic reasoning.
