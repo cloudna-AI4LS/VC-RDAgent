@@ -164,7 +164,7 @@ CSV-based graph: disease, phenotype, gene nodes and edges. **All of these files 
 
 #### 6. Case library (`general_cases/`)
 
-Real phenotype–disease cases for similar-case retrieval, embedding-based ranking, and few-shot.
+Virtual phenotype–disease cases for similar-case retrieval, embedding-based ranking, and few-shot.
 
 | File | Description |
 |------|-------------|

@@ -307,7 +307,7 @@ async def controller_pipeline_stream_en(
                 {
                     "type": "status",
                     "data": "More information is needed. Re-extracting required details...",
-                    "phase": "workflow",
+                    "phase": "info_extraction",
                 }
             ) + "\n"
 
@@ -328,11 +328,13 @@ async def controller_pipeline_stream_en(
                     ensure_ascii=False,
                 ) + "\n"
 
+            # Mark information-extraction phase as completed again so the UI
+            # can re-highlight the \"Info extraction\" step after the retry.
             yield json.dumps(
                 {
                     "type": "status",
                     "data": "[Completed] Information extraction",
-                    "phase": "workflow",
+                    "phase": "info_extraction",
                 }
             ) + "\n"
 
@@ -451,6 +453,17 @@ async def controller_pipeline_stream_en(
                 final_response=workflow_result_for_eval,
                 task_type=task_type,
             )
+
+            evaluation_tool_results = evaluation_results.get("evaluation_tool_results") or {}
+            for _name, _result in evaluation_tool_results.items():
+                yield json.dumps(
+                    {
+                        "type": "tool_response",
+                        "tool_name": _name,
+                        "data": _tool_result_to_str(_result),
+                    },
+                    ensure_ascii=False,
+                ) + "\n"
 
             evaluation_response = evaluation_results.get("evaluation_response", "") or ""
             reasoning_matches = re.finditer(r"<think>(.*?)</think>", evaluation_response, re.DOTALL)

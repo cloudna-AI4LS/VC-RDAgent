@@ -18,7 +18,10 @@ import logging
 import multiprocessing
 import os
 import queue
-from typing import Any, AsyncGenerator, Dict, List, Optional
+import uuid
+from collections import deque
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Deque, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -101,11 +104,46 @@ except (ValueError, TypeError):
 _task_semaphore: Optional[asyncio.Semaphore] = None
 
 
+@dataclass
+class WaitingEntry:
+    request_id: str
+
+
+_waiting_queue: Deque[WaitingEntry] = deque()
+
+
 def _get_task_semaphore() -> asyncio.Semaphore:
     global _task_semaphore
     if _task_semaphore is None:
         _task_semaphore = asyncio.Semaphore(TASK_QUEUE_SIZE)
     return _task_semaphore
+
+
+def _queue_add() -> str:
+    """Add a request to the global waiting queue and return its ID."""
+    req_id = str(uuid.uuid4())
+    _waiting_queue.append(WaitingEntry(request_id=req_id))
+    return req_id
+
+
+def _queue_remove(req_id: str) -> None:
+    """Remove a request from the global waiting queue by ID."""
+    if not req_id:
+        return
+    for idx, entry in enumerate(_waiting_queue):
+        if entry.request_id == req_id:
+            del _waiting_queue[idx]
+            break
+
+
+def _queue_position(req_id: str) -> int:
+    """Return 1-based position of the request in the waiting queue; 0 if not found."""
+    if not req_id:
+        return 0
+    for idx, entry in enumerate(_waiting_queue):
+        if entry.request_id == req_id:
+            return idx + 1
+    return 0
 
 
 async def _consume_stream_into_queue(
@@ -344,18 +382,28 @@ async def chat_stream_dashboard(payload: ChatRequest):
 
         # Send a lightweight queue status event before acquiring the semaphore,
         # so the frontend can show "waiting in queue" even while this request
-        # is still pending for a running pipeline.
+        # is still pending for a running pipeline. Use a global waiting queue
+        # so that the position can be updated dynamically if needed.
+        req_id = ""
         try:
+            req_id = _queue_add()
+            position = _queue_position(req_id)
             queue_event = json.dumps(
-                {"type": "status", "data": "Waiting in queue...", "phase": "queue"},
+                {
+                    "type": "status",
+                    "data": f"Waiting in queue (#{position})...",
+                    "phase": "queue",
+                    "position": position,
+                },
                 ensure_ascii=False,
             )
             yield f"data: {queue_event}\n\n"
         except Exception:
             # Queue hint is purely cosmetic; do not affect the main pipeline.
-            pass
+            _queue_remove(req_id)
 
         async with sem:
+            _queue_remove(req_id)
             full_response = ""
             try:
                 KEEPALIVE_INTERVAL = float(os.environ.get("DASHBOARD_KEEPALIVE_INTERVAL", "10"))
@@ -628,18 +676,67 @@ async def chat_ws(websocket: WebSocket):
                 conversation_messages.pop(0)
                 total_tokens = count_messages_tokens(conversation_messages)
 
-        # Send queue status before acquiring semaphore so client shows "Queue" while actually waiting
+        # Send queue status before acquiring semaphore so client shows "Queue" while actually waiting.
+        # While waiting, periodically send keepalive (phase=queue) to keep the connection alive.
+        req_id = ""
         try:
+            req_id = _queue_add()
+            position = _queue_position(req_id)
             queue_event = json.dumps(
-                {"type": "status", "data": "Waiting in queue...", "phase": "queue"},
+                {
+                    "type": "status",
+                    "data": f"Waiting in queue (#{position})...",
+                    "phase": "queue",
+                    "position": position,
+                },
                 ensure_ascii=False,
             )
             await websocket.send_text(queue_event)
         except Exception:
             continue
 
-        async with sem:
-            await _run_pipeline_and_send_ws(websocket, query, conversation_messages, session, sem)
+        # Wait for semaphore with heartbeat while in the queue
+        try:
+            try:
+                KEEPALIVE_INTERVAL = float(os.environ.get("DASHBOARD_QUEUE_KEEPALIVE_INTERVAL", "10"))
+            except (ValueError, TypeError):
+                KEEPALIVE_INTERVAL = 10.0
+
+            got_sem = False
+            while True:
+                try:
+                    await asyncio.wait_for(sem.acquire(), timeout=KEEPALIVE_INTERVAL)
+                    got_sem = True
+                    break
+                except asyncio.TimeoutError:
+                    try:
+                        position = _queue_position(req_id)
+                        keepalive = json.dumps(
+                            {
+                                "type": "keepalive",
+                                "data": "",
+                                "phase": "queue",
+                                "position": position,
+                            },
+                            ensure_ascii=False,
+                        )
+                        await websocket.send_text(keepalive)
+                    except Exception:
+                        # Client likely gone; give up this request
+                        raise
+
+            # Remove from waiting queue: this request is now running.
+            _queue_remove(req_id)
+
+            try:
+                await _run_pipeline_and_send_ws(websocket, query, conversation_messages, session, sem)
+            finally:
+                if got_sem:
+                    sem.release()
+        except Exception:
+            _queue_remove(req_id)
+            # Let outer loop handle disconnect / errors appropriately
+            return
 
 
 # Mount static files so /rdagent/rdagent_dashboard.html and assets work

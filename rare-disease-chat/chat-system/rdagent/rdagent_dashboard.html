@@ -5,12 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VC-RDAgent: Rare Disease Intelligent Diagnosis System</title>
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/Snoopy-ly/image-host/main/uPic/icon.png">
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
         :root {
-            /* 浅色系 - 参考主流 AI Chat 页面 (ChatGPT / Claude 等) */
             --bg-dark: #f5f7fa;
             --bg-panel: #ffffff;
             --bg-card: #ffffff;
@@ -25,14 +25,15 @@
             --radius: 10px;
             --sidebar-w: 280px;
             --bottom-h: 320px; /* Changed to px for clarity */
-            --header-h: 52px; /* Added for consistent header height */
+            --header-h: 52px;
             --resize-h: 6px; /* Height of the resize handle */
-            --center-col-h: calc(100vh - var(--header-h) - var(--bottom-h) - var(--resize-h)); /* Dynamic height for center-col */
+            --footer-h: 28px; /* Fixed footer height for brand info */
+            --center-col-h: calc(100vh - var(--header-h) - var(--bottom-h) - var(--resize-h) - var(--footer-h)); /* Dynamic height for center-col */
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        /* 浅色系滚动条 */
+        /* Light scrollbar */
         .sidebar-left .history-list,
         .sidebar-left .examples-list,
         .chat-pane,
@@ -67,15 +68,30 @@
             overflow: hidden; /* Main body scroll handled by flex items */
         }
 
+        .app-footer {
+            flex-shrink: 0;
+            height: var(--footer-h);
+            min-height: var(--footer-h);
+            padding: 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center; /* Center footer content horizontally */
+            font-size: 12px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+            text-align: center;
+        }
+
         .app-header {
             flex-shrink: 0;
             background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 50%, #f5f3ff 100%);
             border-bottom: 2px solid var(--accent);
-            padding: 12px 20px;
+            padding: 8px 20px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            height: var(--header-h);
+            min-height: var(--header-h);
             z-index: 10;
             position: relative;
             box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
@@ -94,7 +110,7 @@
             font-size: 18px;
             font-weight: 600;
             color: #1e40af;
-            margin-left: 4px;
+            margin: 0 0 0 4px;
             letter-spacing: -0.02em;
         }
         .app-header .badge {
@@ -217,6 +233,11 @@
             color: var(--error);
             background: rgba(220, 38, 38, 0.1);
         }
+        .sidebar-left .sidebar-block-history .history-item-delete-disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
         .sidebar-left .sidebar-block-examples .example-item {
             background: rgba(124, 58, 237, 0.05);
             border: 1px solid rgba(124, 58, 237, 0.15);
@@ -259,7 +280,7 @@
             position: fixed; /* Fixed position relative to viewport */
             left: var(--sidebar-w);
             right: 0;
-            bottom: var(--bottom-h); /* Position it right above center-bottom */
+            bottom: calc(var(--bottom-h) + var(--footer-h)); /* Above center-bottom, which sits above footer */
             height: var(--resize-h);
             background: var(--border);
             cursor: ns-resize;
@@ -279,12 +300,12 @@
             border-radius: 1px;
         }
 
-        /* Pipeline 底边永远贴屏幕底部：fixed + bottom:0，只改 height */
+        /* Pipeline bottom above footer: fixed + bottom: footer-h, only height changed */
         .center-bottom {
             position: fixed;
             left: var(--sidebar-w);
             right: 0;
-            bottom: 0;
+            bottom: var(--footer-h);
             width: auto;
             height: var(--bottom-h);
             min-height: 180px;
@@ -383,6 +404,17 @@
         .message.assistant .bubble table { width: 100%; border-collapse: collapse; margin: 12px 0; }
         .message.assistant .bubble th,.message.assistant .bubble td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; }
         .message.assistant .bubble th { background: var(--bg-panel); font-weight: 600; }
+
+        /* Welcome bubble: leading symbols for each line */
+        .welcome-bubble > p:nth-child(2)::before,
+        .welcome-bubble > p:nth-child(3)::before,
+        .welcome-bubble > p:nth-child(4)::before {
+            content: '✦ ';
+            display: inline-block;
+            margin-right: 8px;
+            font-weight: 600;
+            color: var(--accent);
+        }
 
         /* Pipeline steps strip */
         .pipeline-strip {
@@ -727,8 +759,9 @@
                     <div class="message assistant">
                         <div class="bubble welcome-bubble">
                             <p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p>
-                            <p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p>
-                            <p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>
+                            <p>An intelligent diagnosis system for rare diseases, powered by a virtual case-augmented reasoning framework and a multi-agent architecture, with further insights available in <a href="https://doi.org/10.64898/2026.02.09.702153" target="_blank" rel="noopener noreferrer">our publication</a>.</p>
+                            <p>Explore the traceable diagnostic workflow, from phenotype extraction to differential diagnosis, by selecting an example case or entering a query.</p>
+                            <p class="welcome-disclaimer">This platform is a functional demonstration for academic exchange only. For comprehensive features and custom development, please access the source code on <a href="https://github.com/cloudna-AI4LS/VC-RDAgent/tree/main/rare-disease-chat" target="_blank" rel="noopener noreferrer">GitHub</a> for local deployment.</p>
                         </div>
                     </div>
                 </div>
@@ -764,6 +797,10 @@
         </div>
     </div>
 
+    <footer class="app-footer">
+        © 2026 CLOUDNA AI4LS Research · VC-RDAgent · <a href="https://github.com/cloudna-AI4LS/VC-RDAgent" target="_blank" rel="noopener noreferrer">&nbsp;GitHub&nbsp;</a> · <a href="https://doi.org/10.64898/2026.02.09.702153" target="_blank" rel="noopener noreferrer">&nbsp;Paper&nbsp;</a>
+    </footer>
+
     <script>
         (function() {
             const HISTORY_KEY = 'rdagent_input_history';
@@ -790,14 +827,15 @@
             function updateLayoutHeights(newBottomHeight) {
                 const headerH = getCssVar('--header-h');
                 const resizeH = getCssVar('--resize-h');
+                const footerH = getCssVar('--footer-h');
                 const windowHeight = window.innerHeight;
 
-                // 1. Clamp newBottomHeight
-                const maxBottomHeight = windowHeight - headerH - resizeH - CHAT_MIN_PX;
+                // 1. Clamp newBottomHeight (leave space for footer)
+                const maxBottomHeight = windowHeight - headerH - resizeH - footerH - CHAT_MIN_PX;
                 const clampedBottomHeight = Math.max(BOTTOM_MIN_PX, Math.min(newBottomHeight, maxBottomHeight));
                 
-                // 2. Calculate center-col height based on clampedBottomHeight
-                const calculatedCenterColHeight = windowHeight - headerH - clampedBottomHeight - resizeH;
+                // 2. Calculate center-col height based on clampedBottomHeight (include footer)
+                const calculatedCenterColHeight = windowHeight - headerH - clampedBottomHeight - resizeH - footerH;
 
                 // 3. Apply CSS variables
                 document.documentElement.style.setProperty('--bottom-h', `${clampedBottomHeight}px`);
@@ -811,10 +849,11 @@
                 const centerCol = document.getElementById('centerCol'); // Get centerCol element
                 if (!handle || !centerCol) return;
 
-                // Initial setup
+                // Initial setup (account for footer)
                 const headerH = getCssVar('--header-h');
                 const resizeH = getCssVar('--resize-h');
-                const usableHeight = window.innerHeight - headerH - resizeH;
+                const footerH = getCssVar('--footer-h');
+                const usableHeight = window.innerHeight - headerH - resizeH - footerH;
                 
                 // Set initial height for the bottom panel based on ratio
                 updateLayoutHeights(DEFAULT_BOTTOM_RATIO * usableHeight);
@@ -825,8 +864,9 @@
                     if (!dragging) return;
                     e.preventDefault(); // Prevent text selection while dragging
                     
-                    // Calculate the new height for the bottom panel based on cursor position
-                    const newBottomHeight = window.innerHeight - e.clientY; 
+                    // Bottom panel sits above footer; height = viewport - footer - cursorY
+                    const footerH = getCssVar('--footer-h');
+                    const newBottomHeight = window.innerHeight - footerH - e.clientY;
                     updateLayoutHeights(newBottomHeight);
                 }
 
@@ -857,7 +897,8 @@
                     } else {
                         const headerH = getCssVar('--header-h');
                         const resizeH = getCssVar('--resize-h');
-                        const usableHeight = window.innerHeight - headerH - resizeH;
+                        const footerH = getCssVar('--footer-h');
+                        const usableHeight = window.innerHeight - headerH - resizeH - footerH;
                         updateLayoutHeights(DEFAULT_BOTTOM_RATIO * usableHeight);
                     }
                 });
@@ -867,9 +908,10 @@
 
             let sessionId = null;
             let isProcessing = false;
-            var currentWs = null;  // 当前 WebSocket，刷新/关闭页面前主动关闭以便后台立即停止
+            var currentWs = null;  // Current WebSocket; close before refresh/close so backend stops immediately
+            var currentRequestMsgId = null;  // History msgId for the running request; close WS when this entry is deleted to stop backend
             const stepStates = {};
-            var queueShowTimer = null;  // 排队满 1 秒后才在 Pipeline 前显示 Queue 标签
+            var queueShowTimer = null;  // Show Queue label in front of Pipeline only after 1s in queue
             var hasToolCallForPhase = { info_extraction: false, workflow: false };
             const phaseOrder = ['classification', 'info_extraction', 'workflow', 'evaluation', 'synthesis'];
             const phaseLabels = {
@@ -908,7 +950,11 @@
                         const timeStr = t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                         const short = item.query.length > 80 ? item.query.slice(0, 80) + '…' : item.query;
                         const msgIdAttr = item.msgId ? ' data-msg-id="' + escapeAttr(item.msgId) + '"' : '';
-                        return '<div class="history-item" data-index="' + i + '" data-query="' + escapeAttr(item.query) + '"' + msgIdAttr + '><div class="history-item-content"><div>' + escapeHtml(short) + '</div><div class="time">' + timeStr + '</div></div><button type="button" class="history-item-delete" aria-label="Delete">×</button></div>';
+                        const isRunning = item.msgId && item.msgId === currentRequestMsgId;
+                        const deleteBtn = isRunning
+                            ? '<button type="button" class="history-item-delete history-item-delete-disabled" aria-label="Cannot delete while running" title="Cannot delete while running">×</button>'
+                            : '<button type="button" class="history-item-delete" aria-label="Delete">×</button>';
+                        return '<div class="history-item" data-index="' + i + '" data-query="' + escapeAttr(item.query) + '"' + msgIdAttr + '><div class="history-item-content"><div>' + escapeHtml(short) + '</div><div class="time">' + timeStr + '</div></div>' + deleteBtn + '</div>';
                     }).join('');
             }
             function escapeHtml(s) {
@@ -1136,16 +1182,22 @@
                 if (deleteBtn) {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (deleteBtn.classList.contains('history-item-delete-disabled')) return;
                     const item = deleteBtn.closest('.history-item');
                     if (!item || item.dataset.index === undefined) return;
                     const index = parseInt(item.dataset.index, 10);
                     const msgId = item.dataset.msgId;
+                    if (msgId === currentRequestMsgId) {
+                        setStatusLine('Cannot delete the running request. Wait for it to finish or clear the chat.', false);
+                        return;
+                    }
                     if (msgId) {
                         const userEl = document.getElementById(msgId);
                         if (userEl) {
-                            const assistantEl = userEl.nextElementSibling;
+                            const nextEl = userEl.nextElementSibling;
                             userEl.remove();
-                            if (assistantEl && assistantEl.classList.contains('message')) assistantEl.remove();
+                            // Only remove the next node if it is this turn's assistant reply (avoid removing next user message when this turn had no output)
+                            if (nextEl && nextEl.classList.contains('message') && nextEl.classList.contains('assistant')) nextEl.remove();
                         }
                     }
                     const list = getHistory().filter(function (_, i) { return i !== index; });
@@ -1177,12 +1229,12 @@
                 const bubble = document.createElement('div');
                 bubble.className = 'bubble';
                 if (messageId && role === 'assistant') bubble.id = messageId;
-                var isWelcomeBubble = role === 'assistant' && content && (content.indexOf('This dashboard shows real-time pipeline steps') !== -1);
+                var isWelcomeBubble = role === 'assistant' && content && (content.indexOf('An intelligent diagnosis system for rare diseases') !== -1);
                 if (content) {
                     bubble.dataset.rawContent = content;
                     if (isWelcomeBubble) {
                         bubble.classList.add('welcome-bubble');
-                        bubble.innerHTML = '<p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p>';
+                        bubble.innerHTML = '<p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>An intelligent diagnosis system for rare diseases, powered by a virtual case-augmented reasoning framework and a multi-agent architecture, with further insights available in <a href="https://doi.org/10.64898/2026.02.09.702153" target="_blank" rel="noopener noreferrer">our publication</a>.</p><p>Explore the traceable diagnostic workflow, from phenotype extraction to differential diagnosis, by selecting an example case or entering a query.</p><p class="welcome-disclaimer">This platform is a functional demonstration for academic exchange only. For comprehensive features and custom development, please access the source code on <a href="https://github.com/cloudna-AI4LS/VC-RDAgent/tree/main/rare-disease-chat" target="_blank" rel="noopener noreferrer">GitHub</a> for local deployment.</p>';
                     } else {
                         bubble.innerHTML = formatMessage(content);
                     }
@@ -1301,12 +1353,14 @@
             }
             function resetUI() {
                 isProcessing = false;
+                currentRequestMsgId = null;
                 document.getElementById('userInput').disabled = false;
                 document.getElementById('sendBtn').disabled = false;
                 var clearBtn = document.getElementById('clearBtn');
                 if (clearBtn) clearBtn.disabled = false;
                 document.getElementById('sendBtnText').textContent = 'Send';
                 document.getElementById('userInput').focus();
+                renderHistory(); // refresh so "running" item's delete button becomes enabled
             }
 
             async function sendMessage() {
@@ -1322,6 +1376,7 @@
                 document.getElementById('sendBtnText').innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
 
                 var userMsgId = 'hist_' + Date.now();
+                currentRequestMsgId = userMsgId;
                 addMessage('user', query, userMsgId);
                 input.value = '';
                 saveHistory({ query: query, time: Date.now(), msgId: userMsgId });
@@ -1340,6 +1395,16 @@
                     var type = data.type;
                     var payload = data.data;
                     var phase = data.phase || '';
+                    // Queue keepalive: update queue position dynamically
+                    if (type === 'keepalive' && phase === 'queue') {
+                        var pos = (typeof data.position === 'number') ? data.position : 0;
+                        var text = pos > 0 ? ('Waiting in queue (#' + pos + ')...') : 'Waiting in queue...';
+                        setStatusLine(text, true, true);
+                        updatePipelineStep('queue', text);
+                        appendStatusLog('queue', text);
+                        setBubbleThinking(assistantBubble, 'Waiting...');
+                        return true;
+                    }
                     if (type === 'keepalive') return true;
                     if (type === 'status') {
                         setStatusLine(payload, true, phase === 'queue');
@@ -1410,10 +1475,11 @@
                         } catch (e) { console.warn('WS parse:', e); }
                     };
                     ws.onerror = function() { showError('WebSocket error'); };
-                    ws.onclose = function() { currentWs = null; resetUI(); };
+                    ws.onclose = function() { currentWs = null; currentRequestMsgId = null; resetUI(); };
                 } catch (err) {
                     showError(err.message);
                     saveConversation();
+                    currentRequestMsgId = null;
                     resetUI();
                 }
             }
@@ -1431,7 +1497,7 @@
                 if (isProcessing) return;
                 var chat = document.getElementById('chatContainer');
                 if (chat) {
-                    chat.innerHTML = '<div class="message assistant"><div class="bubble welcome-bubble"><p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>A rare-disease intelligent diagnosis system based on a virtual case-augmented reasoning framework, built with a multi-agent architecture and supporting phenotype extraction, disease diagnosis, and evaluation.</p><p>This dashboard shows real-time pipeline steps, tool execution, reasoning streams, and final output. Select an example case or a previous query from the left panel to begin.</p></div></div>';
+                    chat.innerHTML = '<div class="message assistant"><div class="bubble welcome-bubble"><p><strong>VC-RDAgent: Rare Disease Intelligent Diagnosis System</strong></p><p>An intelligent diagnosis system for rare diseases, powered by a virtual case-augmented reasoning framework and a multi-agent architecture, with further insights available in <a href="https://doi.org/10.64898/2026.02.09.702153" target="_blank" rel="noopener noreferrer">our publication</a>.</p><p>Explore the traceable diagnostic workflow, from phenotype extraction to differential diagnosis, by selecting an example case or entering a query.</p><p class="welcome-disclaimer">This platform is a functional demonstration for academic exchange only. For comprehensive features and custom development, please access the source code on <a href="https://github.com/cloudna-AI4LS/VC-RDAgent/tree/main/rare-disease-chat" target="_blank" rel="noopener noreferrer">GitHub</a> for local deployment.</p></div></div>';
                     saveConversation();
                 }
                 sessionId = null;
