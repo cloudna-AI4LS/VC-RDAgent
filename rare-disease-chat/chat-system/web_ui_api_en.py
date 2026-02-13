@@ -510,7 +510,10 @@ async def controller_pipeline_stream_en(
         # Completion status already sent via workflow_status_callback; avoid duplicate status log.
 
         # Override task_type when workflow actually ran disease_diagnosis_tool
-        if workflow_info.get("workflow") == "disease_diagnosis_tool":
+        workflow_actually_ran_diagnosis = (
+            workflow_info.get("workflow") == "disease_diagnosis_tool"
+        )
+        if workflow_actually_ran_diagnosis:
             task_type = "disease_diagnosis"
 
         if task_type == "disease_diagnosis" and workflow_info.get("workflow") is None:
@@ -549,8 +552,15 @@ async def controller_pipeline_stream_en(
                 return
 
         # Phase 4: Evaluation (moved right after workflow; final_response uses workflow result)
+        # Only evaluate when workflow actually ran diagnosis and produced a non-empty result
+        # (skip when result was faked in retry-failed branch)
         evaluation_response_clean = ""
-        if task_type == "disease_diagnosis":
+        workflow_result_for_check = str(workflow_info.get("result") or "").strip()
+        if (
+            task_type == "disease_diagnosis"
+            and workflow_actually_ran_diagnosis
+            and workflow_result_for_check
+        ):
             yield json.dumps(
                 {
                     "type": "status",

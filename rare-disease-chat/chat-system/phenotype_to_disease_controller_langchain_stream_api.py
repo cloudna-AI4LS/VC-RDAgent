@@ -804,8 +804,7 @@ Available task types:
 
 You MUST respond with a valid JSON object in exactly this format, no other text:
 {{"task_type": "<one of the task_type values from the list above>"}}
-
-Example: {{"task_type": "disease_diagnosis"}}"""
+"""
     
     try:
         response_chunks = []
@@ -905,12 +904,13 @@ class InfoExtractionAgent:
     async def _call_model(self, state: MessagesState):
         """Call the model with tools (with streaming)"""
         messages = state["messages"]
-        # TODO: strip thinking from AIMessage in messages
+        # Strip thinking/reasoning from AIMessage before passing to model to save context
         for i in range(len(messages)):
             if isinstance(messages[i], AIMessage):
-                messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content, flags=re.DOTALL)
+                messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content or '', flags=re.DOTALL)
                 messages[i].content = re.sub(r'.*?</think>', '', messages[i].content, flags=re.DOTALL)
-        # print(f"DEBUG: Messages: {messages}")
+                if getattr(messages[i], "additional_kwargs", None) and "reasoning_content" in messages[i].additional_kwargs:
+                    messages[i].additional_kwargs["reasoning_content"] = ""
         
         # Different prompts based on whether tools are specified
         if self.specified_tools:
@@ -1153,6 +1153,13 @@ class EvaluationAgent:
     async def _call_model(self, state: MessagesState):
         """Call the model with tools for evaluation (with streaming)"""
         messages = state["messages"]
+        # Strip thinking/reasoning from AIMessage before passing to model to save context
+        for i in range(len(messages)):
+            if isinstance(messages[i], AIMessage):
+                messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content or '', flags=re.DOTALL)
+                messages[i].content = re.sub(r'.*?</think>', '', messages[i].content, flags=re.DOTALL)
+                if getattr(messages[i], "additional_kwargs", None) and "reasoning_content" in messages[i].additional_kwargs:
+                    messages[i].additional_kwargs["reasoning_content"] = ""
 
         # Check if first call: last message type
         last_message = messages[-1] if messages else None
@@ -1395,6 +1402,14 @@ class WorkflowAgent:
     async def _call_model(self, state: MessagesState):
         """LLM decides whether to call tool (with streaming)"""
         messages = state["messages"]
+        # Strip thinking/reasoning from AIMessage before passing to model to save context
+        for i in range(len(messages)):
+            if isinstance(messages[i], AIMessage):
+                messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content or '', flags=re.DOTALL)
+                messages[i].content = re.sub(r'.*?</think>', '', messages[i].content, flags=re.DOTALL)
+                if getattr(messages[i], "additional_kwargs", None) and "reasoning_content" in messages[i].additional_kwargs:
+                    messages[i].additional_kwargs["reasoning_content"] = ""
+                    
         status_sent = False
 
         response = await _stream_dashscope_with_tools(
@@ -1729,8 +1744,16 @@ class PromptTemplateAgent:
         # Define the function that calls the model (with streaming)
         async def call_model(state: State):
             messages = state['messages']
+            # Strip thinking/reasoning from AIMessage before passing to model to save context
+            messages = list(messages)
+            for i in range(len(messages)):
+                if isinstance(messages[i], AIMessage):
+                    messages[i].content = re.sub(r'<think>.*?</think>', '', messages[i].content or '', flags=re.DOTALL)
+                    messages[i].content = re.sub(r'.*?</think>', '', messages[i].content, flags=re.DOTALL)
+                    if getattr(messages[i], "additional_kwargs", None) and "reasoning_content" in messages[i].additional_kwargs:
+                        messages[i].additional_kwargs["reasoning_content"] = ""
             response = await _stream_dashscope_with_tools(
-                list(messages), self.prompt_tools, agent_label="PromptTemplateAgent",
+                messages, self.prompt_tools, agent_label="PromptTemplateAgent",
             )
             return {"messages": [response]}
         
